@@ -1,0 +1,247 @@
+
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+
+type Challenge = {
+  title: string;
+  startsWith?: string;
+  contains?: string;
+  length?: number;
+};
+
+const challenges: Challenge[] = [
+  { title: "Name a 5-letter word beginning with A", startsWith: "a", length: 5 },
+  { title: "Name a word containing the letter X", contains: "x" },
+  { title: "Name a 7-letter word", length: 7 },
+  { title: "Name a word beginning with Q", startsWith: "q" },
+  { title: "Name a 6-letter word containing Z", contains: "z", length: 6 },
+];
+
+type WordResult = {
+  recognized: boolean;
+  eligible: boolean | null;
+  identity?: string;
+  word: string;
+  rarity?: number;
+  tier?: number;
+  checks?: Record<string, boolean>;
+  message?: string;
+};
+
+type Discovery = {
+  word: string;
+  rarity: number;
+  tier: number;
+};
+
+export default function WordsPage() {
+  const [round, setRound] = useState(0);
+  const [guess, setGuess] = useState("");
+  const [used, setUsed] = useState<Discovery[]>([]);
+  const [feedback, setFeedback] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const challenge = challenges[Math.min(round, challenges.length - 1)];
+  const finished = round >= challenges.length;
+  const score = used.reduce((sum, entry) => sum + entry.rarity, 0);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || finished || !guess.trim()) return;
+
+    setBusy(true);
+    setFeedback("Checking your word...");
+
+    const params = new URLSearchParams({ word: guess.trim() });
+
+    if (challenge.startsWith) params.set("startsWith", challenge.startsWith);
+    if (challenge.contains) params.set("contains", challenge.contains);
+    if (challenge.length !== undefined)
+      params.set("length", String(challenge.length));
+
+    try {
+      const response = await fetch(`/api/word?${params.toString()}`);
+      if (!response.ok) throw new Error("Word service unavailable");
+
+      const result = (await response.json()) as WordResult;
+
+      if (!result.recognized) {
+        setFeedback("Not in our current word list. Try another word.");
+        return;
+      }
+
+      if (!result.eligible) {
+        setFeedback(
+          "That word is recognized, but it doesn't match the challenge."
+        );
+        return;
+      }
+
+      if (used.some((entry) => entry.word === result.word)) {
+        setFeedback("You've already used that word!");
+        return;
+      }
+
+      if (result.rarity === undefined || result.tier === undefined) {
+        setFeedback("This word doesn't have a score yet.");
+        return;
+      }
+
+      setUsed((previous) => [
+        ...previous,
+        {
+          word: result.word,
+          rarity: result.rarity!,
+          tier: result.tier!,
+        },
+      ]);
+
+      setFeedback(
+        `${result.word.toUpperCase()} · ${result.rarity}/100 · Tier ${result.tier} — Accepted!`
+      );
+      setGuess("");
+      setRound((previous) => previous + 1);
+    } catch {
+      setFeedback("Couldn't check that word. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function restart() {
+    setRound(0);
+    setGuess("");
+    setUsed([]);
+    setFeedback("");
+  }
+
+  return (
+    <main className="min-h-screen bg-[#0b0e12] px-5 py-10 text-white">
+      <div className="mx-auto max-w-2xl">
+        <header className="mb-12 flex items-center justify-between">
+          <Link href="/" className="text-xl font-black tracking-tight">
+            obscure<span className="text-[#d9ff72]">.</span>
+          </Link>
+          <span className="text-xs font-bold tracking-widest text-[#d9ff72]">
+            WORDS BETA
+          </span>
+        </header>
+
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold tracking-widest text-[#d9ff72]">
+              OBSCURE WORDS
+            </p>
+            <h1 className="mt-2 text-4xl font-black tracking-tight">
+              Words are worth points.
+            </h1>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-white/40">TOTAL SCORE</p>
+            <p className="text-3xl font-black text-[#d9ff72]">{score}</p>
+          </div>
+        </div>
+
+        {finished ? (
+          <section className="rounded-3xl border border-white/10 bg-[#171d24] p-8 text-center">
+            <div className="mb-5 text-6xl">🏆</div>
+            <h2 className="text-3xl font-black">Five words discovered!</h2>
+            <p className="mt-4 text-white/50">Your final score</p>
+            <p className="my-7 text-7xl font-black text-[#d9ff72]">{score}</p>
+            <button
+              onClick={restart}
+              className="w-full cursor-pointer rounded-xl bg-[#d9ff72] p-4 font-bold text-black"
+            >
+              Play again
+            </button>
+          </section>
+        ) : (
+          <section className="rounded-3xl border border-white/10 bg-[#171d24] p-7 sm:p-9">
+            <div className="mb-5 flex justify-between text-sm text-white/45">
+              <span>CHALLENGE {round + 1} / 5</span>
+              <span>{used.length} accepted</span>
+            </div>
+
+            <div className="mb-8 flex gap-2">
+              {challenges.map((_, index) => (
+                <div
+                  key={index}
+                  className={`h-2 flex-1 rounded-full ${
+                    index < round ? "bg-[#d9ff72]" : "bg-white/10"
+                  }`}
+                />
+              ))}
+            </div>
+
+            <h2 className="mb-8 text-3xl font-black leading-tight">
+              {challenge.title}
+            </h2>
+
+            <form onSubmit={submit}>
+              <input
+                autoFocus
+                value={guess}
+                onChange={(event) => setGuess(event.target.value)}
+                disabled={busy}
+                maxLength={24}
+                autoComplete="off"
+                placeholder="Your most obscure word..."
+                className="w-full rounded-xl border border-white/15 bg-[#0b1016] px-5 py-5 text-lg outline-none focus:border-[#d9ff72]"
+              />
+              <button
+                type="submit"
+                disabled={busy || !guess.trim()}
+                className="mt-3 w-full cursor-pointer rounded-xl bg-[#d9ff72] p-4 font-bold text-black disabled:opacity-40"
+              >
+                {busy ? "Checking..." : "Submit word ↗"}
+              </button>
+            </form>
+
+            {feedback && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/75"
+              >
+                {feedback}
+              </div>
+            )}
+
+            <p className="mt-7 text-xs leading-5 text-white/35">
+              Obscurity estimates use English word frequency.
+              The current beta contains 50,000 candidate words.
+            </p>
+          </section>
+        )}
+
+        {used.length > 0 && (
+          <section className="mt-6 rounded-3xl border border-white/10 bg-[#171d24] p-7">
+            <h3 className="mb-5 font-bold">Your discoveries</h3>
+            <div className="space-y-3">
+              {used.map((entry, index) => (
+                <div
+                  key={entry.word}
+                  className="flex items-center justify-between border-b border-white/10 pb-3"
+                >
+                  <div>
+                    <p className="font-medium">
+                      {index + 1}. {entry.word}
+                    </p>
+                    <p className="text-xs text-white/35">
+                      Tier {entry.tier}
+                    </p>
+                  </div>
+                  <span className="font-bold text-[#d9ff72]">
+                    +{entry.rarity}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </main>
+  );
+}

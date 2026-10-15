@@ -1,137 +1,45 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
-import { data } from "@/lib/answers";
-import type { Answer } from "@/lib/answers";
-
-type Mode = "iceberg" | "climb" | "vault" | "extinction" | "roulette" | "collector";
-type Category = "ocean" | "fungi" | "space";
-
-type Game = {
-  mode: Mode;
-  category: Category;
-  stage: number;
-  score: number;
-  used: string[];
-  excluded: number[];
-  lives: number;
-  swaps: number;
-  pending: Answer | null;
-  finished: boolean;
-  message: string;
-  seconds: number;
-  previous: number;
-  groups: string[];
-};
-
-
-const categories: Record<Category, string> = {
-  ocean: "Marine Life",
-  fungi: "Fungi & Mushrooms",
-  space: "Solar System Objects",
-};
-
-const modeInfo: {
-  id: Mode;
-  name: string;
-  icon: string;
-  description: string;
-  tag: string;
-}[] = [
-  {
-    id: "iceberg",
-    name: "The Iceberg",
-    icon: "🧊",
-    description: "Descend through five increasingly obscure levels. Save your rarest answers for later.",
-    tag: "PROGRESSION",
-  },
-  {
-    id: "climb",
-    name: "Rarity Climb",
-    icon: "📈",
-    description: "Every answer must be rarer than the last. How long can you keep climbing?",
-    tag: "ENDLESS",
-  },
-  {
-    id: "vault",
-    name: "Obscurity Vault",
-    icon: "💎",
-    description: "Fill five slots with rare answers. You have two chances to replace a selection.",
-    tag: "STRATEGY",
-  },
-  {
-    id: "extinction",
-    name: "Extinction",
-    icon: "☠️",
-    description: "Each accepted answer eliminates its entire rarity tier. Can you clear all five?",
-    tag: "SURVIVAL",
-  },
-  {
-    id: "roulette",
-    name: "Obscure Roulette",
-    icon: "🎲",
-    description: "Five rounds, shifting categories and rarity thresholds. Three lives to survive.",
-    tag: "CHAOS",
-  },
-  {
-    id: "collector",
-    name: "The Collector",
-    icon: "🗃️",
-    description: "Ninety seconds to collect as many discoveries as possible. Diversity earns bonuses.",
-    tag: "SPEEDRUN",
-  },
-];
-
-const tier = (rarity: number) => Math.min(5, Math.ceil(rarity / 20));
-const normalize = (s: string) =>
-  s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "");
-const keyOf = (category: Category, answer: Answer) =>
-  `${category}:${normalize(answer.name)}`;
-
-const newGame = (mode: Mode, category: Category): Game => ({
-  mode,
-  category,
-  stage: 0,
-  score: 0,
-  used: [],
-  excluded: [],
-  lives: 3,
-  swaps: 2,
-  pending: null,
-  finished: false,
-  message: "",
-  seconds: 90,
-  previous: 0,
-  groups: [],
-});
-
-const rouletteCategories: Category[] = [
-  "ocean", "fungi", "space", "ocean", "fungi"
-];
-const rouletteRequirements = [1, 3, 2, 4, 5];
+import { useEffect, useRef, useState } from "react";
+import type { Category } from "@/lib/answers";
+import type { AnswerResult } from "@/lib/answer-engine";
+import {
+  applyAnswer,
+  categoryNames,
+  createGame,
+  currentCategory,
+  modes,
+  requirement,
+  resolveVault,
+} from "@/lib/game-engine";
+import type { Game, Mode } from "@/lib/game-engine";
 
 export default function Home() {
   const [game, setGame] = useState<Game | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<Category>("ocean");
+  const [category, setCategory] = useState<Category>("ocean");
   const [guess, setGuess] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [validating, setValidating] = useState(false);
+  const session = useRef(0);
+  const busyRef = useRef(false);
 
+  // Only The Collector has a countdown timer.
   useEffect(() => {
     if (!game || game.mode !== "collector" || game.finished) return;
 
     const timer = window.setInterval(() => {
       setGame((current) => {
-        if (!current || current.mode !== "collector" || current.finished) {
+        if (!current || current.mode !== "collector" || current.finished)
           return current;
-        }
-        const next = Math.max(0, current.seconds - 1);
+
+        const seconds = Math.max(0, current.seconds - 1);
+
         return {
           ...current,
-          seconds: next,
-          finished: next === 0,
+          seconds,
+          finished: seconds === 0,
         };
       });
     }, 1000);
@@ -140,376 +48,138 @@ export default function Home() {
   }, [game?.mode, game?.finished]);
 
   function start(mode: Mode) {
-    setGame(newGame(mode, selectedCategory));
+    session.current++;
+    busyRef.current = false;
+    setGame(createGame(mode, category));
     setGuess("");
     setFeedback("");
+    setBusy(false);
     setCopied(false);
   }
 
-  function reset() {
-    if (game) start(game.mode);
-  }
-
-  function backHome() {
+  function home() {
+    session.current++;
+    busyRef.current = false;
     setGame(null);
     setGuess("");
     setFeedback("");
+    setBusy(false);
   }
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!game || game.finished || validating) return;
-    if (game.mode === "vault" && game.pending) return;
 
-    const category =
-      game.mode === "roulette"
-        ? rouletteCategories[game.stage]
-        : game.category;
+    if (!game || game.finished || busyRef.current || game.pending) return;
 
-    const raw = normalize(guess.trim());
-    if (!raw) return;
-
-    if (game.mode === "iceberg") {
-      setFeedback("Checking your discovery...");
-
-      try {
-        const params = new URLSearchParams({
-          name: guess.trim(),
-          category,
-        });
-
-        const response = await fetch(
-          `/api/answer?${params.toString()}`
-        );
-
-        if (!response.ok) throw new Error("Lookup failed");
-
-        const result = await response.json();
-
-        if (!result.recognized) {
-          setFeedback(result.message ?? "Not recognized yet.");
-          return;
-        }
-
-        if (result.eligible !== true) {
-          setFeedback(
-            `${result.name} is recognized, but category eligibility is unconfirmed.`
-          );
-          return;
-        }
-
-        if (result.rarity === null || result.tier === null) {
-          setFeedback(
-            `${result.name} is a valid discovery! Its obscurity score is still pending.`
-          );
-          return;
-        }
-
-        const identity = result.identity ?? `${category}:${raw}`;
-
-        if (game.used.includes(identity)) {
-          setFeedback("You've already used that discovery!");
-          return;
-        }
-
-        const needed = game.stage + 1;
-
-        if (result.tier < needed) {
-          setFeedback(
-            `${result.name}: Tier ${result.tier}. You need Tier ${needed} or higher.`
-          );
-          return;
-        }
-
-        const nextStage = game.stage + 1;
-
-        setGame({
-          ...game,
-          stage: nextStage,
-          score: game.score + result.rarity,
-          used: [...game.used, identity],
-          finished: nextStage >= 5,
-        });
-
-        setFeedback(
-          `${result.name} accepted! +${result.rarity} points.`
-        );
-      } catch {
-        setFeedback("Answer service unavailable. No penalty.");
-      }
-
+    const name = guess.trim();
+    if (!name || name.length > 100) {
+      setFeedback("Enter an answer between 1 and 100 characters.");
       return;
     }
 
-    const answer = data[category].find(
-      (item) =>
-        normalize(item.name) === raw ||
-        item.aliases?.some((alias) => normalize(alias) === raw)
+    const currentSession = session.current;
+    const activeCategory = currentCategory(game);
+
+    busyRef.current = true;
+    setBusy(true);
+    setFeedback("Checking your discovery...");
+
+    try {
+      const params = new URLSearchParams({
+        name,
+        category: activeCategory,
+      });
+
+      const response = await fetch(`/api/answer?${params.toString()}`);
+
+      if (!response.ok) throw new Error("Answer service unavailable");
+
+      const result = (await response.json()) as AnswerResult;
+
+      if (currentSession !== session.current) return;
+
+      const evaluation = applyAnswer(game, result);
+
+      setGame(evaluation.game);
+      setFeedback(evaluation.message);
+
+      if (evaluation.success) {
+        setGuess("");
+      }
+    } catch {
+      if (currentSession === session.current) {
+        setFeedback("Could not check your answer. Try again.");
+      }
+    } finally {
+      if (currentSession === session.current) {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  function chooseVault(keep: boolean) {
+    if (!game?.pending) return;
+    setFeedback(
+      keep
+        ? `${game.pending.name} locked into your vault!`
+        : "Answer discarded. Try something rarer."
     );
-
-    const submittedGuess = guess.trim();
-    setGuess("");
-
-    if (!answer) {
-      if (category === "space") {
-        setFeedback(
-          "Not in our astronomy database yet. No penalty."
-        );
-        return;
-      }
-
-      setValidating(true);
-      setFeedback("Checking the knowledge database...");
-
-      try {
-        const params = new URLSearchParams({
-          name: submittedGuess,
-          category: category === "ocean" ? "animal" : "fungi",
-        });
-
-        const response = await fetch(
-          `/api/validate?${params.toString()}`
-        );
-
-        if (!response.ok) {
-          throw new Error("Validation unavailable");
-        }
-
-        const result = await response.json();
-
-        if (result.recognized) {
-          const verifiedCategory =
-            category === "fungi" ||
-            result.source === "common-names";
-
-          setFeedback(
-            `${result.name ?? submittedGuess} is recognized! ` +
-            (verifiedCategory
-              ? "However, we haven't assigned it an obscurity score yet. " +
-                "No penalty; try another answer to advance."
-              : "GBIF confirms its animal classification, " +
-                "but we haven't verified its marine habitat or rarity. " +
-                "No penalty.")
-          );
-        } else {
-          setFeedback(
-            "Not recognized yet. This doesn't necessarily mean " +
-            "your answer is wrong. No penalty."
-          );
-        }
-      } catch {
-        setFeedback(
-          "The knowledge service is temporarily unavailable. " +
-          "No penalty; please try again."
-        );
-      } finally {
-        setValidating(false);
-      }
-
-      return;
-    }
-
-    const key = keyOf(category, answer);
-
-    if (game.used.includes(key)) {
-      setFeedback("You've already used that answer. Find something new!");
-      return;
-    }
-
-    const rarity = answer.rarity;
-    const band = tier(rarity);
-    const discovery = `${answer.name} · Obscurity ${rarity}/100 · Tier ${band}`;
-
-    
-
-    if (game.mode === "climb") {
-      if (rarity <= game.previous) {
-        setFeedback(
-          `${discovery}. Your next answer must exceed ${game.previous}.`
-        );
-        return;
-      }
-
-      setGame({
-        ...game,
-        previous: rarity,
-        stage: game.stage + 1,
-        score: game.score + rarity,
-        used: [...game.used, key],
-        finished: rarity === 100,
-      });
-      setFeedback(`${discovery}. New personal best!`);
-      return;
-    }
-
-    if (game.mode === "vault") {
-      setGame({ ...game, pending: answer });
-      setFeedback(
-        `${discovery}. Lock it in, or use a replacement to search for something rarer.`
-      );
-      return;
-    }
-
-    if (game.mode === "extinction") {
-      if (game.excluded.includes(band)) {
-        setFeedback(`${discovery}. Tier ${band} has already gone extinct!`);
-        return;
-      }
-
-      const excluded = [...game.excluded, band];
-      setGame({
-        ...game,
-        score: game.score + rarity,
-        used: [...game.used, key],
-        excluded,
-        stage: excluded.length,
-        finished: excluded.length === 5,
-      });
-      setFeedback(
-        `${discovery}. Tier ${band} is now extinct. +${rarity} points.`
-      );
-      return;
-    }
-
-    if (game.mode === "roulette") {
-      const needed = rouletteRequirements[game.stage];
-
-      if (band < needed) {
-        const lives = game.lives - 1;
-        setGame({
-          ...game,
-          lives,
-          finished: lives <= 0,
-        });
-        setFeedback(
-          `${discovery}. Too common! Tier ${needed}+ required. One life lost.`
-        );
-        return;
-      }
-
-      const nextStage = game.stage + 1;
-      setGame({
-        ...game,
-        stage: nextStage,
-        score: game.score + rarity,
-        used: [...game.used, key],
-        finished: nextStage >= 5,
-      });
-      setFeedback(`${discovery}. Round cleared!`);
-      return;
-    }
-
-    if (game.mode === "collector") {
-      const freshGroup = !game.groups.includes(answer.group);
-      const bonus = freshGroup ? 50 : 0;
-
-      setGame({
-        ...game,
-        score: game.score + rarity + bonus,
-        stage: game.stage + 1,
-        used: [...game.used, key],
-        groups: freshGroup
-          ? [...game.groups, answer.group]
-          : game.groups,
-      });
-      setFeedback(
-        `${discovery}. +${rarity}${bonus ? " plus 50 diversity bonus!" : " points!"}`
-      );
-    }
+    setGame(resolveVault(game, keep));
   }
 
-  function lockVault() {
-    if (!game || !game.pending) return;
-
-    const answer = game.pending;
-    const key = keyOf(game.category, answer);
-    const next = game.stage + 1;
-
-    setGame({
-      ...game,
-      stage: next,
-      score: game.score + answer.rarity,
-      used: [...game.used, key],
-      pending: null,
-      finished: next === 5,
-    });
-
-    setFeedback(`Locked: ${answer.name}. +${answer.rarity} points.`);
-  }
-
-  function replaceVault() {
-    if (!game || !game.pending || game.swaps <= 0) return;
-    setGame({
-      ...game,
-      pending: null,
-      swaps: game.swaps - 1,
-    });
-    setFeedback("Selection discarded. Choose a different answer.");
+  function finish() {
+    if (!game) return;
+    session.current++;
+    busyRef.current = false;
+    setBusy(false);
+    setGame({ ...game, finished: true });
   }
 
   async function share() {
     if (!game) return;
 
-    const name = modeInfo.find((m) => m.id === game.mode)?.name;
-    const result = [
-      `OBSCURE · ${name}`,
+    const title = modes.find((m) => m.id === game.mode)?.name;
+    const text = [
+      `OBSCURE · ${title}`,
       `Score: ${game.score}`,
-      `Discoveries: ${game.used.length}`,
+      `Discoveries: ${game.discoveries.length}`,
       `https://playobscure.com`,
     ].join("\n");
 
     try {
-      await navigator.clipboard.writeText(result);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
     } catch {
-      setFeedback("Clipboard unavailable. Please copy your results manually.");
+      setFeedback("Clipboard unavailable. Copy your results manually.");
     }
   }
 
-  const currentCategory = game
-    ? game.mode === "roulette"
-      ? rouletteCategories[Math.min(game.stage, 4)]
-      : game.category
-    : selectedCategory;
+  const activeCategory = game ? currentCategory(game) : category;
+  const mode = modes.find((m) => m.id === game?.mode);
 
-  const requiredTier = game
-    ? game.mode === "iceberg"
-      ? Math.min(5, game.stage + 1)
-      : game.mode === "roulette"
-        ? rouletteRequirements[Math.min(game.stage, 4)]
-        : 1
-    : 1;
-
-  const label = game
-    ? modeInfo.find((m) => m.id === game.mode)!
-    : null;
-
-  const panel = "rounded-3xl border border-white/10 bg-[#171d24] p-6 sm:p-8";
+  const panel =
+    "rounded-3xl border border-white/10 bg-[#171d24] p-6 sm:p-8";
   const primary =
-    "cursor-pointer rounded-xl bg-[#d9ff72] px-6 py-4 font-bold text-[#101710] transition hover:bg-[#edffb0]";
+    "cursor-pointer rounded-xl bg-[#d9ff72] px-6 py-4 font-bold text-[#101710] transition hover:bg-[#edffb0] disabled:cursor-not-allowed disabled:opacity-50";
   const secondary =
-    "cursor-pointer rounded-xl border border-white/15 px-5 py-3 text-sm text-white/70 transition hover:border-white/40 hover:bg-white/5";
+    "cursor-pointer rounded-xl border border-white/15 px-5 py-3 text-sm text-white/75 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30";
 
   return (
     <main className="min-h-screen bg-[#0b0e12] text-[#f5f7f2]">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_50%_-10%,rgba(112,164,98,0.1),transparent_55%)]" />
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_50%_-10%,rgba(120,170,100,0.12),transparent_60%)]" />
 
       <div className="relative mx-auto max-w-6xl px-5 sm:px-8">
         <header className="flex items-center justify-between border-b border-white/10 py-6">
           <button
-            onClick={backHome}
+            onClick={home}
             className="cursor-pointer text-3xl font-black tracking-[-0.075em]"
           >
             obscure<span className="text-[#d9ff72]">.</span>
           </button>
-          <div className="flex items-center gap-3">
-            <span className="hidden text-xs text-white/35 sm:inline">
-              THE UNEXPECTED IS OUT THERE
-            </span>
-            <span className="rounded-full border border-[#d9ff72]/30 bg-[#d9ff72]/10 px-3 py-1 text-xs text-[#d9ff72]">
-              ARCADE BETA
-            </span>
-          </div>
+          <span className="rounded-full border border-[#d9ff72]/30 bg-[#d9ff72]/10 px-3 py-1 text-xs text-[#d9ff72]">
+            ARCADE BETA
+          </span>
         </header>
 
         {!game ? (
@@ -518,78 +188,68 @@ export default function Home() {
               <p className="mb-5 text-xs font-bold tracking-[0.25em] text-[#d9ff72]">
                 WELCOME TO PLAY OBSCURE
               </p>
-              <h1 className="max-w-4xl text-5xl font-black leading-[1.05] tracking-[-0.065em] sm:text-7xl">
+              <h1 className="text-5xl font-black leading-[1.05] tracking-[-0.065em] sm:text-7xl">
                 THINK DIFFERENT.
                 <br />
                 <span className="text-[#d9ff72]">THINK OBSCURE.</span>
               </h1>
-              <p className="mt-6 max-w-2xl text-lg leading-8 text-white/50">
-                Six experiments in unusual knowledge, rarity, and discovery.
-                How much do you know that everybody else overlooks?
+              <p className="mt-6 max-w-xl text-lg leading-8 text-white/50">
+                Six games about strange knowledge, rare answers, and
+                unexpected discoveries. How obscure can you get?
               </p>
             </section>
 
             <div className="mb-8 flex flex-wrap items-center gap-3">
               <span className="text-sm text-white/50">Choose a category:</span>
-              {(["ocean", "fungi", "space"] as Category[]).map((category) => (
+              {(Object.keys(categoryNames) as Category[]).map((cat) => (
                 <button
-                  key={category}
-                  onClick={() => setSelectedCategory(category)}
-                  className={`cursor-pointer rounded-full border px-4 py-2 text-sm transition ${
-                    selectedCategory === category
+                  key={cat}
+                  onClick={() => setCategory(cat)}
+                  className={`cursor-pointer rounded-full border px-4 py-2 text-sm ${
+                    category === cat
                       ? "border-[#d9ff72] bg-[#d9ff72]/10 text-[#d9ff72]"
                       : "border-white/15 text-white/50 hover:text-white"
                   }`}
                 >
-                  {categories[category]}
+                  {categoryNames[cat]}
                 </button>
               ))}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {modeInfo.map((mode, i) => (
-                <div
-                  key={mode.id}
-                  className="group flex flex-col rounded-[28px] border border-white/10 bg-[#171d24] p-7 transition hover:-translate-y-1 hover:border-[#d9ff72]/40"
+              {modes.map((item, i) => (
+                <article
+                  key={item.id}
+                  className="group flex flex-col rounded-3xl border border-white/10 bg-[#171d24] p-7 transition hover:-translate-y-1 hover:border-[#d9ff72]/40"
                 >
                   <div className="mb-7 flex items-center justify-between">
-                    <span className="text-5xl">{mode.icon}</span>
-                    <span className="text-[10px] font-bold tracking-[0.2em] text-[#d9ff72]/80">
-                      {mode.tag}
+                    <span className="text-5xl">{item.icon}</span>
+                    <span className="text-xs text-white/30">
+                      GAME {String(i + 1).padStart(2, "0")}
                     </span>
                   </div>
-
-                  <p className="mb-2 text-xs text-white/25">
-                    GAME {String(i + 1).padStart(2, "0")}
+                  <h2 className="text-2xl font-black">{item.name}</h2>
+                  <p className="mt-3 flex-1 text-sm leading-6 text-white/50">
+                    {item.description}
                   </p>
-
-                  <h2 className="text-2xl font-black tracking-tight">
-                    {mode.name}
-                  </h2>
-
-                  <p className="mt-3 flex-1 text-sm leading-6 text-white/45">
-                    {mode.description}
-                  </p>
-
                   <button
-                    onClick={() => start(mode.id)}
-                    className="mt-8 flex cursor-pointer items-center justify-between rounded-xl border border-white/15 px-5 py-4 text-sm font-bold transition group-hover:border-[#d9ff72] group-hover:bg-[#d9ff72] group-hover:text-black"
+                    onClick={() => start(item.id)}
+                    className="mt-8 flex cursor-pointer justify-between rounded-xl border border-white/15 px-5 py-4 font-bold transition group-hover:border-[#d9ff72] group-hover:bg-[#d9ff72] group-hover:text-black"
                   >
                     Play now <span>↗</span>
                   </button>
-                </div>
+                </article>
               ))}
             </div>
 
-            <p className="mt-10 text-center text-xs leading-6 text-white/35">
-              Scores are experimental editorial estimates, not player-based rarity statistics.
-              Answer banks are incomplete. Help us discover what makes a great game.
+            <p className="mt-10 text-center text-xs text-white/35">
+              Experimental rarity scores · No accounts required
             </p>
           </div>
         ) : (
           <section className="pb-24 pt-10">
             <button
-              onClick={backHome}
+              onClick={home}
               className="mb-9 cursor-pointer text-sm text-white/45 hover:text-white"
             >
               ← Back to arcade
@@ -597,17 +257,13 @@ export default function Home() {
 
             <div className="mb-9 flex flex-wrap items-end justify-between gap-5">
               <div>
-                <p className="mb-3 text-xs font-bold tracking-[0.2em] text-[#d9ff72]">
-                  GAME MODE · {label?.tag}
-                </p>
-                <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
-                  {label?.icon} {label?.name}
+                <h1 className="text-4xl font-black sm:text-5xl">
+                  {mode?.icon} {mode?.name}
                 </h1>
                 <p className="mt-3 text-sm text-white/50">
-                  {categories[currentCategory]}
+                  {categoryNames[activeCategory]}
                 </p>
               </div>
-
               <div className="text-right">
                 <p className="text-xs uppercase tracking-widest text-white/35">
                   Total score
@@ -620,64 +276,50 @@ export default function Home() {
 
             {game.finished ? (
               <div className={`${panel} mx-auto max-w-2xl py-14 text-center`}>
-                <p className="text-6xl">{label?.icon}</p>
-                <p className="mt-7 text-xs font-bold tracking-[0.25em] text-[#d9ff72]">
-                  GAME COMPLETE
+                <p className="text-6xl">🏆</p>
+                <p className="mt-7 text-xs font-bold tracking-widest text-[#d9ff72]">
+                  RUN COMPLETE
                 </p>
-                <h2 className="mt-3 text-4xl font-black">
-                  Expedition finished.
-                </h2>
-                <p className="mt-4 text-white/45">
-                  {game.used.length} discoveries · {categories[game.category]}
+                <h2 className="mt-3 text-4xl font-black">Your discoveries.</h2>
+                <p className="mt-4 text-white/50">
+                  {game.discoveries.length} unique answers discovered
                 </p>
-
                 <p className="my-10 text-7xl font-black text-[#d9ff72]">
                   {game.score.toLocaleString()}
                 </p>
-
                 <div className="grid gap-3 sm:grid-cols-2">
                   <button onClick={share} className={primary}>
                     {copied ? "Copied!" : "Share results ↗"}
                   </button>
-                  <button onClick={reset} className={secondary}>
+                  <button onClick={() => start(game.mode)} className={secondary}>
                     Play again
                   </button>
                 </div>
-                <button
-                  onClick={backHome}
-                  className="mt-6 cursor-pointer text-sm text-white/45 hover:text-white"
-                >
-                  Explore other games →
-                </button>
               </div>
             ) : (
               <div className="grid gap-6 lg:grid-cols-[1fr_290px]">
                 <div className={panel}>
-                  <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
+                  <div className="mb-8 flex items-center justify-between gap-3">
                     <span className="text-xs font-bold tracking-widest text-[#d9ff72]">
                       {game.mode === "collector"
                         ? "COLLECTION RUN"
                         : game.mode === "climb"
-                        ? `CHAIN LENGTH ${game.stage}`
-                        : `ROUND ${Math.min(game.stage + 1, 5)}/5`}
+                        ? `CHAIN ${game.round}`
+                        : `ROUND ${Math.min(game.round + 1, 5)} / 5`}
                     </span>
                     <span className="text-sm text-white/45">
-                      {game.mode === "collector"
-                        ? `${game.seconds} seconds left`
-                        : game.mode === "roulette"
-                        ? `${game.lives} lives remaining`
-                        : `${game.used.length} discoveries`}
+                      {game.discoveries.length} discoveries
                     </span>
                   </div>
 
                   {game.mode === "iceberg" && (
                     <>
-                      <div className="mb-8 grid grid-cols-5 gap-2">
+                      <div className="mb-7 grid grid-cols-5 gap-2">
                         {[1, 2, 3, 4, 5].map((n) => (
                           <div
                             key={n}
-                            className={`rounded-lg border p-3 text-center text-sm ${
-                              n <= game.stage + 1
+                            className={`rounded-lg border p-3 text-center ${
+                              n <= game.round + 1
                                 ? "border-[#d9ff72]/40 bg-[#d9ff72]/10 text-[#d9ff72]"
                                 : "border-white/10 text-white/30"
                             }`}
@@ -687,14 +329,13 @@ export default function Home() {
                         ))}
                       </div>
                       <h2 className="text-3xl font-black">
-                        Depth {game.stage + 1}
+                        Depth {game.round + 1}
                       </h2>
-                      <p className="mt-3 leading-7 text-white/55">
-                        Find something with a rarity of at least{" "}
-                        <strong className="text-[#d9ff72]">
-                          Tier {requiredTier}
-                        </strong>.
-                        Rarer answers qualify, but you cannot use them again.
+                      <p className="mt-4 text-white/55">
+                        Name something in {categoryNames[activeCategory]}.
+                        You need <strong className="text-[#d9ff72]">
+                          Tier {requirement(game)}+
+                        </strong> to descend.
                       </p>
                     </>
                   )}
@@ -702,17 +343,17 @@ export default function Home() {
                   {game.mode === "climb" && (
                     <>
                       <h2 className="text-3xl font-black">
-                        Beat your last answer.
+                        Go rarer. Every time.
                       </h2>
-                      <p className="mt-4 text-white/55">
-                        Your previous obscurity score:
+                      <p className="mt-5 text-white/50">
+                        Previous obscurity score:
                       </p>
-                      <p className="my-6 text-6xl font-black text-[#d9ff72]">
+                      <p className="my-5 text-6xl font-black text-[#d9ff72]">
                         {game.previous}
                         <span className="text-xl text-white/25">/100</span>
                       </p>
                       <p className="text-sm text-white/45">
-                        Next answer must score strictly higher.
+                        Your next answer must score higher.
                       </p>
                     </>
                   )}
@@ -720,25 +361,24 @@ export default function Home() {
                   {game.mode === "vault" && (
                     <>
                       <h2 className="text-3xl font-black">
-                        Fill your vault.
+                        Build your vault.
                       </h2>
-                      <div className="mt-7 grid grid-cols-5 gap-2">
+                      <div className="mt-6 grid grid-cols-5 gap-2">
                         {Array.from({ length: 5 }, (_, i) => (
                           <div
                             key={i}
                             className={`rounded-xl border p-3 text-center ${
-                              i < game.stage
+                              i < game.round
                                 ? "border-[#d9ff72]/40 bg-[#d9ff72]/10"
                                 : "border-white/10"
                             }`}
                           >
-                            {i < game.stage ? "💎" : "◇"}
+                            {i < game.round ? "💎" : "◇"}
                           </div>
                         ))}
                       </div>
                       <p className="mt-5 text-sm text-white/50">
-                        {game.swaps} replacements remaining.
-                        Choose carefully!
+                        {game.swaps} rerolls remaining.
                       </p>
                     </>
                   )}
@@ -746,11 +386,11 @@ export default function Home() {
                   {game.mode === "extinction" && (
                     <>
                       <h2 className="text-3xl font-black">
-                        The tiers are disappearing.
+                        Make every tier extinct.
                       </h2>
-                      <p className="mt-4 text-sm text-white/50">
-                        Each valid answer permanently eliminates its rarity tier.
-                        Clear all five tiers to win.
+                      <p className="mt-4 text-white/50">
+                        Each accepted answer eliminates its rarity tier.
+                        Find all five without reusing a tier.
                       </p>
                       <div className="mt-7 grid grid-cols-5 gap-2">
                         {[1, 2, 3, 4, 5].map((n) => (
@@ -758,7 +398,7 @@ export default function Home() {
                             key={n}
                             className={`rounded-xl border p-3 text-center ${
                               game.excluded.includes(n)
-                                ? "border-red-400/20 bg-red-400/10 text-red-300/60 line-through"
+                                ? "border-red-400/25 bg-red-400/10 text-red-300/60 line-through"
                                 : "border-[#d9ff72]/30 text-[#d9ff72]"
                             }`}
                           >
@@ -772,16 +412,16 @@ export default function Home() {
                   {game.mode === "roulette" && (
                     <>
                       <h2 className="text-3xl font-black">
-                        {categories[currentCategory]}
+                        {categoryNames[activeCategory]}
                       </h2>
                       <p className="mt-4 text-white/55">
-                        Find a valid answer with rarity{" "}
+                        Submit an answer with rarity{" "}
                         <strong className="text-[#d9ff72]">
-                          Tier {requiredTier}+
+                          Tier {requirement(game)}+
                         </strong>.
                       </p>
-                      <p className="mt-4 text-sm text-white/35">
-                        Three lives. Five rounds. Categories change as you progress.
+                      <p className="mt-4 text-sm text-white/40">
+                        {game.lives} lives remaining · Five rounds
                       </p>
                     </>
                   )}
@@ -792,64 +432,69 @@ export default function Home() {
                         Collect everything.
                       </h2>
                       <p className="mt-4 text-white/50">
-                        Submit as many unique answers as possible before the timer expires.
-                        New subcategories earn +50 bonus points.
+                        Name as many unique things as possible
+                        before time runs out.
                       </p>
-                      <div className="mt-7 h-3 overflow-hidden rounded-full bg-white/10">
+                      <p className="mt-6 text-5xl font-black text-[#d9ff72]">
+                        {game.seconds}s
+                      </p>
+                      <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/10">
                         <div
-                          className="h-full rounded-full bg-[#d9ff72] transition-all duration-500"
-                          style={{ width: `${(game.seconds / 90) * 100}%` }}
+                          className="h-full rounded-full bg-[#d9ff72] transition-all"
+                          style={{
+                            width: `${(game.seconds / 90) * 100}%`,
+                          }}
                         />
                       </div>
-                      <p className="mt-4 text-sm text-[#d9ff72]">
-                        {game.groups.length} different subcategories discovered
-                      </p>
                     </>
                   )}
 
-                  {game.mode === "vault" && game.pending ? (
+                  {game.pending ? (
                     <div className="mt-9 rounded-2xl border border-[#d9ff72]/30 bg-[#d9ff72]/10 p-6">
                       <p className="text-xs font-bold tracking-widest text-[#d9ff72]">
-                        CANDIDATE DISCOVERED
+                        VAULT CANDIDATE
                       </p>
                       <h3 className="mt-3 text-2xl font-black">
                         {game.pending.name}
                       </h3>
-                      <p className="mt-2 text-sm text-white/55">
-                        Obscurity {game.pending.rarity}/100 · Tier{" "}
-                        {tier(game.pending.rarity)}
+                      <p className="mt-2 text-sm text-white/60">
+                        Obscurity {game.pending.rarity}/100 ·
+                        Tier {game.pending.tier}
                       </p>
                       <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                        <button onClick={lockVault} className={primary}>
-                          Lock it in
+                        <button className={primary} onClick={() => chooseVault(true)}>
+                          Lock answer
                         </button>
                         <button
-                          onClick={replaceVault}
-                          disabled={game.swaps <= 0}
-                          className={`${secondary} disabled:cursor-not-allowed disabled:opacity-30`}
+                          className={secondary}
+                          onClick={() => chooseVault(false)}
+                          disabled={game.swaps === 0}
                         >
-                          Replace ({game.swaps})
+                          Reroll ({game.swaps})
                         </button>
                       </div>
                     </div>
                   ) : (
                     <form onSubmit={submit} className="mt-9">
-                      <label
-                        htmlFor="guess"
-                        className="mb-3 block text-sm font-semibold text-white/70"
-                      >
+                      <label htmlFor="answer" className="mb-3 block text-sm font-semibold text-white/70">
                         Enter your discovery
                       </label>
                       <input
-                        id="guess"
+                        id="answer"
                         value={guess}
                         onChange={(e) => setGuess(e.target.value)}
-                        placeholder="Start typing an answer..."
+                        disabled={busy}
                         autoComplete="off"
+                        maxLength={100}
+                        placeholder="Think of something unusual..."
                         className="w-full rounded-xl border border-white/15 bg-[#0b1016] px-5 py-4 text-white outline-none placeholder:text-white/25 focus:border-[#d9ff72]"
                       />
-                      <button type="submit" className={`${primary} mt-3 w-full`}>
-                        Submit discovery ↗
+                      <button
+                        type="submit"
+                        disabled={busy || !guess.trim()}
+                        className={`${primary} mt-3 w-full`}
+                      >
+                        {busy ? "Checking..." : "Submit discovery ↗"}
                       </button>
                     </form>
                   )}
@@ -857,50 +502,33 @@ export default function Home() {
                   {feedback && (
                     <div
                       role="status"
-                      className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/70"
+                      aria-live="polite"
+                      className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/75"
                     >
                       {feedback}
                     </div>
                   )}
 
-                  <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
+                  <div className="mt-8 flex justify-between gap-4">
                     <button
                       onClick={() => {
-                        const sorted = [...data[currentCategory]]
-                          .filter((a) => !game.used.includes(keyOf(currentCategory, a)))
-                          .filter((a) => {
-                            if (game.mode === "iceberg")
-                              return tier(a.rarity) >= requiredTier;
-                            if (game.mode === "climb")
-                              return a.rarity > game.previous;
-                            if (game.mode === "roulette")
-                              return tier(a.rarity) >= requiredTier;
-                            if (game.mode === "extinction")
-                              return !game.excluded.includes(tier(a.rarity));
-                            return true;
-                          })
-                          .sort((a, b) => a.rarity - b.rarity);
-
-                        const hintAnswer = sorted[0];
-                        setFeedback(
-                          hintAnswer
-                            ? `Hint: An accepted answer starts with "${hintAnswer.name[0]}" and has ${hintAnswer.name.length} characters.`
-                            : "No unused eligible answers remain in this category."
-                        );
+                        session.current++;
+                        busyRef.current = false;
+                        setBusy(false);
+                        setGame(createGame(game.mode, game.category));
+                        setGuess("");
+                        setFeedback("");
                       }}
+                      className="cursor-pointer text-sm text-white/40 hover:text-white"
+                    >
+                      Restart
+                    </button>
+                    <button
+                      onClick={finish}
                       className="cursor-pointer text-sm text-[#d9ff72] hover:underline"
                     >
-                      Need a hint?
+                      Finish run →
                     </button>
-
-                    {["climb", "collector"].includes(game.mode) && (
-                      <button
-                        onClick={() => setGame({ ...game, finished: true })}
-                        className="cursor-pointer text-sm text-white/45 hover:text-white"
-                      >
-                        Finish run →
-                      </button>
-                    )}
                   </div>
                 </div>
 
@@ -909,56 +537,48 @@ export default function Home() {
                     <h3 className="mb-5 text-sm font-bold">
                       Your discoveries
                     </h3>
-                    {game.used.length === 0 ? (
+
+                    {game.discoveries.length === 0 ? (
                       <p className="text-sm leading-6 text-white/35">
-                        Nothing discovered yet. Your answers will appear here.
+                        Your discoveries will appear here.
                       </p>
                     ) : (
-                      <div className="max-h-[360px] space-y-3 overflow-y-auto">
-                        {game.used.map((key, i) => {
-                          const [cat] = key.split(":");
-                          const entries =
-  cat === "ocean" || cat === "fungi" || cat === "space"
-    ? data[cat]
-    : [];
-
-const entry = entries.find(
-  (a) => keyOf(cat as Category, a) === key
-);
-                          return (
-                            <div
-                              key={key}
-                              className="flex items-center justify-between gap-2 border-b border-white/10 pb-3"
-                            >
-                              <span className="text-sm text-white/70">
-                                {i + 1}. {entry?.name}
-                              </span>
-                              <span className="text-sm font-bold text-[#d9ff72]">
-                                {entry?.rarity}
-                              </span>
+                      <div className="max-h-[400px] space-y-3 overflow-y-auto">
+                        {game.discoveries.map((item, i) => (
+                          <div
+                            key={`${item.identity}-${i}`}
+                            className="flex items-center justify-between gap-2 border-b border-white/10 pb-3"
+                          >
+                            <div className="min-w-0">
+                              <p className="break-words text-sm text-white/80">
+                                {i + 1}. {item.name}
+                              </p>
+                              <p className="text-xs text-white/35">
+                                Tier {item.tier}
+                                {item.estimated ? " · Estimated" : ""}
+                              </p>
                             </div>
-                          );
-                        })}
+                            <span className="font-bold text-[#d9ff72]">
+                              {item.rarity}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
 
                   <div className={panel}>
-                    <p className="text-xs font-bold uppercase tracking-widest text-white/40">
-                      Current category
+                    <p className="text-xs uppercase tracking-widest text-white/40">
+                      Category
                     </p>
                     <p className="mt-3 text-xl font-bold">
-                      {categories[currentCategory]}
+                      {categoryNames[activeCategory]}
                     </p>
                     <p className="mt-3 text-sm leading-6 text-white/40">
-                      {data[currentCategory].length} curated answers.
-                      Scores represent estimated knowledge obscurity.
+                      Rarity scores are experimental estimates of
+                      how obscure an answer may be.
                     </p>
                   </div>
-
-                  <button onClick={reset} className={`${secondary} w-full`}>
-                    Restart game
-                  </button>
                 </aside>
               </div>
             )}
@@ -966,7 +586,7 @@ const entry = entries.find(
         )}
 
         <footer className="border-t border-white/10 py-8 text-center text-xs text-white/30">
-          PLAY OBSCURE © 2026 · SIX GAMES · ONE CURIOUS MIND
+          PLAY OBSCURE © 2026 · THE OBVIOUS IS ONLY THE BEGINNING
         </footer>
       </div>
     </main>

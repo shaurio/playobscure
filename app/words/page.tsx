@@ -1,0 +1,371 @@
+"use client";
+
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
+
+type Challenge = {
+  title: string;
+  label: string;
+  tags: string[];
+  startsWith?: string;
+  contains?: string;
+  length?: number;
+};
+
+// Keep our known-working constraints. Random prompts can come later.
+const challenges: Challenge[] = [
+  { title: "Name a five-letter word beginning with A.", label: "THE FIRST LETTER", tags: ["Starts with A", "5 letters"], startsWith: "a", length: 5 },
+  { title: "Name a word containing the letter X.", label: "HIDDEN LETTER", tags: ["Contains X"], contains: "x" },
+  { title: "Name a seven-letter word.", label: "THE LENGTH TEST", tags: ["Exactly 7 letters"], length: 7 },
+  { title: "Name a word beginning with Q.", label: "UNCOMMON BEGINNINGS", tags: ["Starts with Q"], startsWith: "q" },
+  { title: "Name a six-letter word containing Z.", label: "THE FINAL TEST", tags: ["Contains Z", "6 letters"], contains: "z", length: 6 },
+];
+
+type WordResponse = {
+  recognized: boolean;
+  eligible: boolean | null;
+  word: string;
+  rarity?: number;
+  tier?: number;
+  message?: string;
+};
+
+type Discovery = {
+  word: string;
+  rarity: number;
+  tier: number;
+  prompt: string;
+};
+
+function getGrade(value: number) {
+  if (value >= 81) return { label: "OBSCURE", color: "#f4bf61", message: "An exceptional find." };
+  if (value >= 61) return { label: "DEEP CUT", color: "#bca6fa", message: "Now that's an unusual choice." };
+  if (value >= 41) return { label: "CURIOUS", color: "#77c9cf", message: "A creative discovery." };
+  if (value >= 21) return { label: "FAMILIAR", color: "#a5d7aa", message: "A solid start." };
+  return { label: "COMMON", color: "#9ca7a3", message: "Try digging a little deeper next time." };
+}
+
+const BEST_KEY = "playobscure:words:best:v1";
+
+export default function WordsPage() {
+  const [round, setRound] = useState(0);
+  const [guess, setGuess] = useState("");
+  const [discoveries, setDiscoveries] = useState<Discovery[]>([]);
+  const [reveal, setReveal] = useState<Discovery | null>(null);
+  const [shownScore, setShownScore] = useState(0);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [best, setBest] = useState<number | null>(null);
+  const [newBest, setNewBest] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const requestRef = useRef(false);
+  const sessionRef = useRef(0);
+
+  const finished = round >= challenges.length;
+  const challenge = challenges[Math.min(round, challenges.length - 1)];
+  const score = discoveries.reduce((sum, entry) => sum + entry.rarity, 0);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(BEST_KEY);
+      if (saved !== null && Number.isFinite(Number(saved))) setBest(Number(saved));
+    } catch {
+      // Private browsing or blocked storage should not break the game.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!reveal) return;
+    let frame = 0;
+    const began = performance.now();
+    const target = reveal.rarity;
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - began) / 750);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setShownScore(Math.round(target * eased));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [reveal]);
+
+  useEffect(() => {
+    if (!finished) return;
+    try {
+      const previous = Number(window.localStorage.getItem(BEST_KEY) ?? "0");
+      if (score > previous) {
+        window.localStorage.setItem(BEST_KEY, String(score));
+        setBest(score);
+        setNewBest(true);
+      }
+    } catch {
+      // Best-score tracking is optional.
+    }
+  }, [finished, score]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (requestRef.current || finished || reveal) return;
+    const word = guess.trim().toLowerCase();
+    if (!word) return;
+
+    const currentSession = sessionRef.current;
+    const params = new URLSearchParams({ word });
+    if (challenge.startsWith) params.set("startsWith", challenge.startsWith);
+    if (challenge.contains) params.set("contains", challenge.contains);
+    if (challenge.length !== undefined) params.set("length", String(challenge.length));
+
+    requestRef.current = true;
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/word?${params.toString()}`);
+      if (!response.ok) throw new Error("Word service unavailable");
+      const result = (await response.json()) as WordResponse;
+      if (currentSession !== sessionRef.current) return;
+
+      if (!result.recognized) {
+        setError("Not in our current word list. Try another—there's no penalty.");
+        return;
+      }
+      if (!result.eligible) {
+        setError("That's a real entry, but it doesn't meet this round's rules.");
+        return;
+      }
+      if (discoveries.some((entry) => entry.word === result.word)) {
+        setError("You've already used that word. Find a new one!");
+        return;
+      }
+      if (typeof result.rarity !== "number" || typeof result.tier !== "number") {
+        setError("We recognize that word, but can't score it right now.");
+        return;
+      }
+
+      const entry: Discovery = {
+        word: result.word,
+        rarity: result.rarity,
+        tier: result.tier,
+        prompt: challenge.title,
+      };
+      setDiscoveries((previous) => [...previous, entry]);
+      setShownScore(0);
+      setReveal(entry);
+      setGuess("");
+    } catch {
+      if (currentSession === sessionRef.current) {
+        setError("Couldn't reach the word database. Please try again.");
+      }
+    } finally {
+      if (currentSession === sessionRef.current) {
+        requestRef.current = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  function continueRound() {
+    setReveal(null);
+    setError("");
+    setRound((previous) => previous + 1);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function restart() {
+    sessionRef.current += 1;
+    requestRef.current = false;
+    setRound(0);
+    setGuess("");
+    setDiscoveries([]);
+    setReveal(null);
+    setShownScore(0);
+    setError("");
+    setBusy(false);
+    setNewBest(false);
+    setCopied(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  async function share() {
+    const lines = [
+      "OBSCURE WORDS ◆ 5/5",
+      ...discoveries.map((entry, i) => `${i + 1}. ${entry.word.toUpperCase()} · ${entry.rarity}`),
+      `TOTAL: ${score}/500`,
+      "playobscure.com/words",
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  const grade = reveal ? getGrade(reveal.rarity) : null;
+
+  return (
+    <main className="po-words relative min-h-screen bg-[#0b100f] text-[#f3f5ee] antialiased">
+      <style>{`
+        @keyframes po-rise { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes po-pop { 0% { opacity: 0; transform: translateY(14px) scale(.83); } 65% { opacity: 1; transform: translateY(-4px) scale(1.04); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes po-glow { 0%, 100% { opacity: .45; transform: scale(1); } 50% { opacity: .8; transform: scale(1.15); } }
+        .po-rise { animation: po-rise .45s both; }
+        .po-pop { animation: po-pop .65s cubic-bezier(.18,.9,.28,1.15) both; }
+        .po-glow { animation: po-glow 3s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .po-rise, .po-pop, .po-glow { animation: none !important; } }
+      `}</style>
+
+      <div className="pointer-events-none absolute inset-0 opacity-[.35]" style={{ backgroundImage: "radial-gradient(#7c9384 0.65px, transparent 0.65px)", backgroundSize: "28px 28px" }} />
+      <div className="pointer-events-none absolute left-1/2 top-0 h-[520px] w-[800px] -translate-x-1/2 rounded-full bg-[#b4d974]/[.07] blur-[120px]" />
+
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[850px] flex-col px-5 pb-10 sm:px-8">
+        <header className="flex items-center justify-between border-b border-white/10 py-6">
+          <Link href="/" className="group flex items-center gap-3" aria-label="Back to Play Obscure arcade">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#d9ff72]/30 bg-[#d9ff72]/10 text-lg text-[#d9ff72] transition-transform group-hover:rotate-12">✳</span>
+            <span className="text-xl font-black tracking-[-.065em]">obscure<span className="text-[#d9ff72]">.</span></span>
+          </Link>
+          <div className="flex items-center gap-3">
+            <span className="hidden text-[11px] font-bold uppercase tracking-[.22em] text-white/35 sm:inline">The word laboratory</span>
+            <span className="rounded-full border border-[#d9ff72]/20 bg-[#d9ff72]/10 px-3 py-1.5 text-[10px] font-extrabold tracking-[.18em] text-[#d9ff72]">WORDS / BETA</span>
+          </div>
+        </header>
+
+        <section className="pb-7 pt-11 text-center sm:pb-9 sm:pt-14">
+          <div className="mb-4 flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-[.28em] text-[#d9ff72]">
+            <span className="h-px w-7 bg-[#d9ff72]/50" /> A GAME OF UNCOMMON KNOWLEDGE <span className="h-px w-7 bg-[#d9ff72]/50" />
+          </div>
+          <h1 className="text-[clamp(2.7rem,9vw,4.5rem)] font-black leading-none tracking-[-.075em]">Think of a <span className="italic text-[#d9ff72]">better</span> word.</h1>
+          <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-white/45 sm:text-base">Five prompts. Five answers. The more unexpected your words, the higher you score.</p>
+        </section>
+
+        <div className="mb-4 flex items-center justify-between gap-3 px-1 text-xs">
+          <div className="flex items-center gap-2 text-white/45"><span className="text-[#d9ff72]">◆</span> {finished ? "RUN COMPLETED" : `QUESTION ${String(round + 1).padStart(2, "0")} / 05`}</div>
+          <div className="flex items-center gap-5">
+            {best !== null && <span className="hidden text-white/40 sm:inline">BEST <strong className="ml-1 text-white/80">{best}</strong></span>}
+            <span className="text-white/50">SCORE <strong className="ml-1 text-lg text-[#d9ff72]">{score}</strong><span className="text-white/30"> / 500</span></span>
+          </div>
+        </div>
+
+        <div className="mb-5 grid grid-cols-5 gap-2">
+          {challenges.map((_, index) => (
+            <div key={index} className={`h-1.5 rounded-full transition-colors duration-500 ${index < discoveries.length ? "bg-[#d9ff72]" : index === round && !finished ? "bg-white/50" : "bg-white/10"}`} />
+          ))}
+        </div>
+
+        <div className="relative overflow-hidden rounded-[28px] border border-white/[.13] bg-[#151c19] shadow-[0_25px_90px_rgba(0,0,0,.35)]">
+          <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#d9ff72]/75 to-transparent" />
+
+          {finished ? (
+            <div className="po-rise px-6 py-10 text-center sm:px-12 sm:py-14">
+              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#d9ff72]/30 bg-[#d9ff72]/10 text-3xl text-[#d9ff72]">✳</div>
+              <p className="text-xs font-extrabold uppercase tracking-[.24em] text-[#d9ff72]">Five for five</p>
+              <h2 className="mt-3 text-4xl font-black tracking-[-.055em] sm:text-5xl">Nicely discovered.</h2>
+              <p className="mt-3 text-sm text-white/45">You found five words worth a combined</p>
+              <div className="mt-4 text-7xl font-black leading-none tracking-[-.07em] text-[#d9ff72] sm:text-8xl">{score}<span className="ml-2 text-base font-medium tracking-normal text-white/30">/ 500</span></div>
+              {newBest && <div className="mt-4 text-sm font-bold text-[#f4bf61]">✦ NEW PERSONAL BEST</div>}
+
+              <div className="mt-9 space-y-2 text-left">
+                {discoveries.map((entry, index) => (
+                  <div key={entry.word} className="flex items-center gap-3 rounded-xl border border-white/[.07] bg-white/[.035] px-4 py-3">
+                    <span className="w-6 text-xs text-white/30">0{index + 1}</span>
+                    <span className="min-w-0 flex-1 truncate font-semibold capitalize">{entry.word}</span>
+                    <span className="text-xs font-bold" style={{ color: getGrade(entry.rarity).color }}>{getGrade(entry.rarity).label}</span>
+                    <span className="w-10 text-right text-lg font-black text-[#d9ff72]">{entry.rarity}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-7 grid gap-3 sm:grid-cols-2">
+                <button onClick={share} className="rounded-xl bg-[#d9ff72] px-6 py-4 font-extrabold text-[#10180f] transition hover:bg-[#e9ffa9] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d9ff72]">{copied ? "✓ Results copied" : "↗ Share your words"}</button>
+                <button onClick={restart} className="rounded-xl border border-white/15 bg-white/[.04] px-6 py-4 font-bold transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d9ff72]">Play again →</button>
+              </div>
+              <p className="mt-6 text-xs text-white/30">Personal best saved on this browser. Scores are experimental.</p>
+            </div>
+          ) : reveal && grade ? (
+            <div key={`reveal-${round}`} className="po-rise relative px-6 pb-9 pt-10 text-center sm:px-12 sm:pb-12 sm:pt-14" aria-live="polite">
+              <div className="po-glow pointer-events-none absolute left-1/2 top-16 h-44 w-44 -translate-x-1/2 rounded-full blur-[75px]" style={{ backgroundColor: grade.color, opacity: 0.16 }} />
+              <div className="relative">
+                <p className="text-[11px] font-bold uppercase tracking-[.26em] text-white/40">Discovery confirmed</p>
+                <h2 className="mt-5 break-words text-[clamp(2.4rem,8vw,4.7rem)] font-black capitalize leading-tight tracking-[-.065em]">{reveal.word}</h2>
+                <p className="mt-2 text-xs uppercase tracking-[.22em] text-white/35">Your answer</p>
+                <div className="po-pop mt-9 flex items-baseline justify-center gap-2" style={{ color: grade.color }}>
+                  <span className="text-[clamp(6rem,22vw,10rem)] font-black leading-none tracking-[-.09em] tabular-nums">{shownScore}</span>
+                  <span className="text-xl font-semibold text-white/30">/100</span>
+                </div>
+                <div className="mt-5 inline-flex items-center gap-2 rounded-full border px-5 py-2 text-[11px] font-black tracking-[.22em]" style={{ borderColor: `${grade.color}55`, backgroundColor: `${grade.color}16`, color: grade.color }}>
+                  <span>✦</span> {grade.label} <span>✦</span>
+                </div>
+                <p className="mt-4 text-sm text-white/45">{grade.message}</p>
+                <p className="mt-2 text-xs text-white/30">Provisional score based on English word frequency</p>
+                <button onClick={continueRound} className="mt-10 w-full rounded-xl bg-[#d9ff72] px-6 py-4 text-base font-extrabold text-[#11190e] transition hover:bg-[#e9ffa9] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d9ff72]">
+                  {round === challenges.length - 1 ? "See my results ↗" : "Next question →"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div key={`round-${round}`} className="po-rise px-6 py-8 sm:px-12 sm:py-11">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] font-bold uppercase tracking-[.25em] text-[#d9ff72]">{challenge.label}</p>
+                <span className="text-xs text-white/25">0{round + 1} — 05</span>
+              </div>
+
+              <h2 className="mt-7 max-w-2xl text-[clamp(2rem,6vw,3.3rem)] font-extrabold leading-[1.13] tracking-[-.055em]">{challenge.title}</h2>
+              <div className="mt-6 flex flex-wrap gap-2">
+                {challenge.tags.map((tag) => <span key={tag} className="rounded-full border border-white/10 bg-white/[.055] px-3 py-1.5 text-xs text-white/65">{tag}</span>)}
+              </div>
+
+              <form onSubmit={submit} className="mt-10">
+                <label htmlFor="obscure-word" className="mb-3 block text-xs font-semibold uppercase tracking-[.19em] text-white/45">Your answer</label>
+                <input
+                  ref={inputRef}
+                  id="obscure-word"
+                  value={guess}
+                  onChange={(event) => { setGuess(event.target.value); if (error) setError(""); }}
+                  disabled={busy}
+                  maxLength={24}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="Type something unexpected..."
+                  className="w-full rounded-xl border border-white/15 bg-[#0a100e] px-5 py-5 text-lg font-medium text-white outline-none transition placeholder:text-white/25 focus:border-[#d9ff72] focus:ring-2 focus:ring-[#d9ff72]/10 disabled:opacity-50 sm:text-xl"
+                />
+                <button type="submit" disabled={busy || !guess.trim()} className="mt-3 flex w-full items-center justify-between rounded-xl bg-[#d9ff72] px-6 py-4 text-base font-extrabold text-[#11190e] transition hover:bg-[#e9ffa9] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d9ff72]">
+                  <span>{busy ? "Checking your word..." : "Reveal my score"}</span><span aria-hidden="true">↗</span>
+                </button>
+              </form>
+
+              {error && <p role="status" className="po-rise mt-4 rounded-lg border border-[#f4bf61]/20 bg-[#f4bf61]/10 px-4 py-3 text-sm leading-6 text-[#f4d6a0]">{error}</p>}
+              <div className="mt-8 flex items-center gap-2 border-t border-white/[.08] pt-5 text-xs leading-5 text-white/35">
+                <span className="text-base text-[#d9ff72]">✳</span> Unusual answers score higher. Wrong guesses cost nothing.
+              </div>
+            </div>
+          )}
+        </div>
+
+        {!finished && discoveries.length > 0 && (
+          <section className="mt-5 rounded-2xl border border-white/[.09] bg-[#121815]/90 p-5 sm:p-6">
+            <div className="mb-4 flex items-center justify-between text-xs">
+              <h3 className="font-bold uppercase tracking-[.17em] text-white/65">Your collection</h3>
+              <span className="text-white/35">{discoveries.length} / 5</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {discoveries.map((entry) => (
+                <span key={entry.word} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[.05] px-3 py-2 text-sm">
+                  <span className="capitalize text-white/80">{entry.word}</span><span className="font-bold text-[#d9ff72]">+{entry.rarity}</span>
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <footer className="mt-auto pt-10 text-center text-xs leading-6 text-white/30">
+          A little vocabulary goes a long way. <span className="mx-2 text-white/15">✳</span> 50,000 candidate words and counting.
+          <div className="mt-1">A missing word isn't necessarily invalid. Rarity scores are experimental.</div>
+        </footer>
+      </div>
+    </main>
+  );
+}

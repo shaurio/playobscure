@@ -1,33 +1,26 @@
+
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import {
+  GameHeader,
+  GameProgress,
+  GamePanel,
+  DiscoveryRow,
+} from "@/components/game/GameUI";
+
+type Duration = "relaxed" | "300" | "180" | "90";
+type Phase = "setup" | "loading" | "playing" | "reveal" | "done";
 
 type Challenge = {
+  id?: string;
   title: string;
   label: string;
   tags: string[];
   startsWith?: string;
   contains?: string;
   length?: number;
-};
-
-// Keep our known-working constraints. Random prompts can come later.
-const challenges: Challenge[] = [
-  { title: "Name a five-letter word beginning with A.", label: "THE FIRST LETTER", tags: ["Starts with A", "5 letters"], startsWith: "a", length: 5 },
-  { title: "Name a word containing the letter X.", label: "HIDDEN LETTER", tags: ["Contains X"], contains: "x" },
-  { title: "Name a seven-letter word.", label: "THE LENGTH TEST", tags: ["Exactly 7 letters"], length: 7 },
-  { title: "Name a word beginning with Q.", label: "UNCOMMON BEGINNINGS", tags: ["Starts with Q"], startsWith: "q" },
-  { title: "Name a six-letter word containing Z.", label: "THE FINAL TEST", tags: ["Contains Z", "6 letters"], contains: "z", length: 6 },
-];
-
-type WordResponse = {
-  recognized: boolean;
-  eligible: boolean | null;
-  word: string;
-  rarity?: number;
-  tier?: number;
-  message?: string;
 };
 
 type Discovery = {
@@ -37,111 +30,494 @@ type Discovery = {
   prompt: string;
 };
 
-function getGrade(value: number) {
-  if (value >= 81) return { label: "OBSCURE", color: "#f4bf61", message: "An exceptional find." };
-  if (value >= 61) return { label: "DEEP CUT", color: "#bca6fa", message: "Now that's an unusual choice." };
-  if (value >= 41) return { label: "CURIOUS", color: "#77c9cf", message: "A creative discovery." };
-  if (value >= 21) return { label: "FAMILIAR", color: "#a5d7aa", message: "A solid start." };
-  return { label: "COMMON", color: "#9ca7a3", message: "Try digging a little deeper next time." };
+type WordResult = {
+  recognized: boolean;
+  eligible: boolean | null;
+  word: string;
+  rarity?: number;
+  tier?: number;
+};
+
+const fallback: Challenge[] = [
+  {
+    title: "Name a five-letter word beginning with A",
+    label: "FIRST LETTER",
+    tags: ["Starts with A", "5 letters"],
+    startsWith: "a",
+    length: 5,
+  },
+  {
+    title: "Name a word containing X",
+    label: "LETTER HUNT",
+    tags: ["Contains X"],
+    contains: "x",
+  },
+  {
+    title: "Name a seven-letter word",
+    label: "LENGTH TEST",
+    tags: ["7 letters"],
+    length: 7,
+  },
+  {
+    title: "Name a word beginning with Q",
+    label: "FIRST LETTER",
+    tags: ["Starts with Q"],
+    startsWith: "q",
+  },
+  {
+    title: "Name a six-letter word containing Z",
+    label: "DOUBLE CONSTRAINT",
+    tags: ["6 letters", "Contains Z"],
+    length: 6,
+    contains: "z",
+  },
+];
+
+const settings: {
+  value: Duration;
+  title: string;
+  description: string;
+}[] = [
+  { value: "relaxed", title: "Relaxed", description: "No clock" },
+  { value: "300", title: "Casual", description: "5 minutes" },
+  { value: "180", title: "Classic", description: "3 minutes" },
+  { value: "90", title: "Sprint", description: "90 seconds" },
+];
+
+function timeString(ms: number) {
+  const seconds = Math.ceil(Math.max(0, ms) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(
+    seconds % 60
+  ).padStart(2, "0")}`;
 }
 
-const BEST_KEY = "playobscure:words:best:v1";
+function rarityGrade(value: number) {
+  if (value >= 81)
+    return { label: "OBSCURE", color: "#f4bf61" };
+  if (value >= 61)
+    return { label: "DEEP CUT", color: "#bca6fa" };
+  if (value >= 41)
+    return { label: "CURIOUS", color: "#77c9cf" };
+  if (value >= 21)
+    return { label: "FAMILIAR", color: "#a5d7aa" };
+
+  return { label: "COMMON", color: "#9ca7a3" };
+}
+
+function bestKey(duration: Duration) {
+  return `playobscure:words:best:v2:${duration}`;
+}
+
+function displayChallenge(item: {
+  id?: string;
+  title: string;
+  startsWith?: string;
+  contains?: string;
+  length?: number;
+}): Challenge {
+  const tags: string[] = [];
+
+  if (item.startsWith)
+    tags.push(`Starts with ${item.startsWith.toUpperCase()}`);
+
+  if (item.contains)
+    tags.push(`Contains ${item.contains.toUpperCase()}`);
+
+  if (item.length !== undefined)
+    tags.push(`${item.length} letters`);
+
+  return {
+    ...item,
+    label:
+      tags.length > 1 ? "DOUBLE CONSTRAINT" : "WORD CHALLENGE",
+    tags,
+  };
+}
+
+const button =
+  "inline-flex min-h-14 items-center justify-center " +
+  "rounded-xl bg-[#CCF28A] px-7 font-bold text-[#142017] " +
+  "transition hover:bg-[#e2ffb1] " +
+  "disabled:cursor-not-allowed disabled:opacity-40";
 
 export default function WordsPage() {
+  const [duration, setDuration] = useState<Duration>("180");
+  const [phase, setPhase] = useState<Phase>("setup");
+
+  const [challenges, setChallenges] =
+    useState<Challenge[]>(fallback);
+
   const [round, setRound] = useState(0);
   const [guess, setGuess] = useState("");
-  const [discoveries, setDiscoveries] = useState<Discovery[]>([]);
+  const [discoveries, setDiscoveries] =
+    useState<Discovery[]>([]);
+
   const [reveal, setReveal] = useState<Discovery | null>(null);
   const [shownScore, setShownScore] = useState(0);
-  const [error, setError] = useState("");
+
+  const [timeLeft, setTimeLeft] = useState(180000);
+
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
   const [best, setBest] = useState<number | null>(null);
   const [newBest, setNewBest] = useState(false);
   const [copied, setCopied] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [timedOut, setTimedOut] = useState(false);
+
+  const deadlineRef = useRef<number | null>(null);
+  const remainingRef = useRef(180000);
   const requestRef = useRef(false);
   const sessionRef = useRef(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const finished = round >= challenges.length;
-  const challenge = challenges[Math.min(round, challenges.length - 1)];
-  const score = discoveries.reduce((sum, entry) => sum + entry.rarity, 0);
+  const score = discoveries.reduce(
+    (sum, d) => sum + d.rarity,
+    0
+  );
+
+  const activePrompt =
+    challenges[Math.min(round, challenges.length - 1)];
+
+  const isTimed = duration !== "relaxed";
+
+  const durationName =
+    settings.find((option) => option.value === duration)
+      ?.title ?? "Classic";
+
+  // -------------------------------------
+  // PERSONAL BESTS
+  // -------------------------------------
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(BEST_KEY);
-      if (saved !== null && Number.isFinite(Number(saved))) setBest(Number(saved));
+      const stored =
+        window.localStorage.getItem(bestKey(duration)) ??
+        (duration === "relaxed"
+          ? window.localStorage.getItem(
+              "playobscure:words:best:v1"
+            )
+          : null);
+
+      setBest(
+        stored !== null && Number.isFinite(Number(stored))
+          ? Number(stored)
+          : null
+      );
     } catch {
-      // Private browsing or blocked storage should not break the game.
+      setBest(null);
     }
-  }, []);
+  }, [duration]);
+
+  // -------------------------------------
+  // TIMER
+  // -------------------------------------
+
+  useEffect(() => {
+    if (phase !== "playing" || !isTimed) return;
+
+    const tick = () => {
+      const deadline = deadlineRef.current;
+      if (deadline === null) return;
+
+      const remaining = Math.max(
+        0,
+        deadline - Date.now()
+      );
+
+      remainingRef.current = remaining;
+      setTimeLeft(remaining);
+
+      if (remaining === 0) {
+        finishRun(true);
+      }
+    };
+
+    tick();
+
+    const interval = window.setInterval(tick, 200);
+
+    return () => window.clearInterval(interval);
+  }, [phase, duration, discoveries]);
+
+  // -------------------------------------
+  // SCORE REVEAL ANIMATION
+  // -------------------------------------
 
   useEffect(() => {
     if (!reveal) return;
-    let frame = 0;
-    const began = performance.now();
-    const target = reveal.rarity;
 
-    const tick = (now: number) => {
-      const progress = Math.min(1, (now - began) / 750);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setShownScore(Math.round(target * eased));
-      if (progress < 1) frame = requestAnimationFrame(tick);
+    let frame = 0;
+    const begun = performance.now();
+
+    const animate = (now: number) => {
+      const portion = Math.min(
+        1,
+        (now - begun) / 700
+      );
+
+      setShownScore(
+        Math.round(
+          reveal.rarity *
+            (1 - (1 - portion) ** 3)
+        )
+      );
+
+      if (portion < 1) {
+        frame = requestAnimationFrame(animate);
+      }
     };
 
-    frame = requestAnimationFrame(tick);
+    frame = requestAnimationFrame(animate);
+
     return () => cancelAnimationFrame(frame);
   }, [reveal]);
 
-  useEffect(() => {
-    if (!finished) return;
+  // -------------------------------------
+  // FINISH RUN
+  // -------------------------------------
+
+  function finishRun(expired = false) {
+    deadlineRef.current = null;
+    sessionRef.current++;
+
+    requestRef.current = false;
+    setBusy(false);
+
+    setTimedOut(expired);
+    setPhase("done");
+    setReveal(null);
+
     try {
-      const previous = Number(window.localStorage.getItem(BEST_KEY) ?? "0");
+      const previous = Number(
+        window.localStorage.getItem(bestKey(duration)) ??
+          (duration === "relaxed"
+            ? window.localStorage.getItem(
+                "playobscure:words:best:v1"
+              )
+            : null) ??
+          0
+      );
+
       if (score > previous) {
-        window.localStorage.setItem(BEST_KEY, String(score));
+        window.localStorage.setItem(
+          bestKey(duration),
+          String(score)
+        );
+
         setBest(score);
         setNewBest(true);
       }
     } catch {
-      // Best-score tracking is optional.
+      // Local records are optional.
     }
-  }, [finished, score]);
+  }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  // -------------------------------------
+  // START GAME AND GET RANDOM PROMPTS
+  // -------------------------------------
+
+  async function startGame() {
+    const session = ++sessionRef.current;
+
+    requestRef.current = false;
+    deadlineRef.current = null;
+
+    setRound(0);
+    setGuess("");
+    setDiscoveries([]);
+    setReveal(null);
+    setShownScore(0);
+
+    setError("");
+    setNotice("");
+    setNewBest(false);
+    setCopied(false);
+    setTimedOut(false);
+
+    setPhase("loading");
+    setBusy(false);
+
+    try {
+      const seed = crypto.randomUUID();
+
+      const response = await fetch(
+        `/api/word/prompts?seed=${seed}&count=5`,
+        { cache: "no-store" }
+      );
+
+      if (!response.ok) {
+        throw new Error("Prompt lookup failed");
+      }
+
+      const payload =
+        (await response.json()) as {
+          prompts?: Challenge[];
+        };
+
+      if (
+        !Array.isArray(payload.prompts) ||
+        payload.prompts.length !== 5
+      ) {
+        throw new Error("Incomplete prompt set");
+      }
+
+      if (session !== sessionRef.current) return;
+
+      setChallenges(
+        payload.prompts.map(displayChallenge)
+      );
+    } catch {
+      if (session !== sessionRef.current) return;
+
+      setChallenges(fallback);
+      setNotice(
+        "The random prompt service was unavailable, so we're using starter questions."
+      );
+    }
+
+    if (session !== sessionRef.current) return;
+
+    const total =
+      duration === "relaxed"
+        ? 0
+        : Number(duration) * 1000;
+
+    remainingRef.current = total;
+    setTimeLeft(total);
+
+    deadlineRef.current = isTimed
+      ? Date.now() + total
+      : null;
+
+    setPhase("playing");
+
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }
+
+  // -------------------------------------
+  // SUBMIT ANSWER
+  // -------------------------------------
+
+  async function submit(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
-    if (requestRef.current || finished || reveal) return;
-    const word = guess.trim().toLowerCase();
-    if (!word) return;
 
-    const currentSession = sessionRef.current;
+    if (
+      phase !== "playing" ||
+      requestRef.current ||
+      !activePrompt
+    ) {
+      return;
+    }
+
+    const word = guess.trim().toLowerCase();
+
+    if (!/^[a-z]{3,24}$/.test(word)) {
+      setError(
+        "Please enter an English word of 3–24 letters."
+      );
+      return;
+    }
+
+    if (
+      isTimed &&
+      (
+        deadlineRef.current === null ||
+        deadlineRef.current <= Date.now()
+      )
+    ) {
+      finishRun(true);
+      return;
+    }
+
+    const session = sessionRef.current;
+
     const params = new URLSearchParams({ word });
-    if (challenge.startsWith) params.set("startsWith", challenge.startsWith);
-    if (challenge.contains) params.set("contains", challenge.contains);
-    if (challenge.length !== undefined) params.set("length", String(challenge.length));
+
+    if (activePrompt.startsWith)
+      params.set(
+        "startsWith",
+        activePrompt.startsWith
+      );
+
+    if (activePrompt.contains)
+      params.set(
+        "contains",
+        activePrompt.contains
+      );
+
+    if (activePrompt.length !== undefined)
+      params.set(
+        "length",
+        String(activePrompt.length)
+      );
 
     requestRef.current = true;
     setBusy(true);
     setError("");
 
     try {
-      const response = await fetch(`/api/word?${params.toString()}`);
-      if (!response.ok) throw new Error("Word service unavailable");
-      const result = (await response.json()) as WordResponse;
-      if (currentSession !== sessionRef.current) return;
+      const response = await fetch(
+        `/api/word?${params.toString()}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Word lookup failed");
+      }
+
+      const result =
+        (await response.json()) as WordResult;
+
+      if (session !== sessionRef.current) return;
+
+      if (
+        isTimed &&
+        (
+          deadlineRef.current === null ||
+          Date.now() >= deadlineRef.current
+        )
+      ) {
+        finishRun(true);
+        return;
+      }
 
       if (!result.recognized) {
-        setError("Not in our current word list. Try another—there's no penalty.");
+        setError(
+          "Not in our vocabulary yet. Try another—no penalty."
+        );
         return;
       }
+
       if (!result.eligible) {
-        setError("That's a real entry, but it doesn't meet this round's rules.");
+        setError(
+          "Recognized, but it doesn't satisfy this prompt."
+        );
         return;
       }
-      if (discoveries.some((entry) => entry.word === result.word)) {
-        setError("You've already used that word. Find a new one!");
+
+      if (
+        discoveries.some(
+          (item) => item.word === result.word
+        )
+      ) {
+        setError(
+          "You've used that word already. Try a different one."
+        );
         return;
       }
-      if (typeof result.rarity !== "number" || typeof result.tier !== "number") {
-        setError("We recognize that word, but can't score it right now.");
+
+      if (
+        typeof result.rarity !== "number" ||
+        typeof result.tier !== "number"
+      ) {
+        setError(
+          "We recognize that word, but can't score it yet."
+        );
         return;
       }
 
@@ -149,222 +525,550 @@ export default function WordsPage() {
         word: result.word,
         rarity: result.rarity,
         tier: result.tier,
-        prompt: challenge.title,
+        prompt: activePrompt.title,
       };
-      setDiscoveries((previous) => [...previous, entry]);
-      setShownScore(0);
+
+      // Pause the timer on an accepted answer.
+      if (
+        isTimed &&
+        deadlineRef.current !== null
+      ) {
+        remainingRef.current = Math.max(
+          0,
+          deadlineRef.current - Date.now()
+        );
+
+        setTimeLeft(
+          remainingRef.current
+        );
+
+        deadlineRef.current = null;
+      }
+
+      setDiscoveries(
+        (previous) => [...previous, entry]
+      );
+
       setReveal(entry);
+      setShownScore(0);
       setGuess("");
+      setPhase("reveal");
     } catch {
-      if (currentSession === sessionRef.current) {
-        setError("Couldn't reach the word database. Please try again.");
+      if (session === sessionRef.current) {
+        setError(
+          "Couldn't check your word. Try again."
+        );
       }
     } finally {
-      if (currentSession === sessionRef.current) {
+      if (session === sessionRef.current) {
         requestRef.current = false;
         setBusy(false);
       }
     }
   }
 
+  // -------------------------------------
+  // NEXT QUESTION
+  // -------------------------------------
+
   function continueRound() {
+    if (phase !== "reveal") return;
+
     setReveal(null);
     setError("");
+
+    if (round === challenges.length - 1) {
+      setRound(challenges.length);
+      finishRun();
+      return;
+    }
+
+    if (
+      isTimed &&
+      remainingRef.current <= 0
+    ) {
+      finishRun(true);
+      return;
+    }
+
     setRound((previous) => previous + 1);
-    requestAnimationFrame(() => inputRef.current?.focus());
+
+    if (isTimed) {
+      deadlineRef.current =
+        Date.now() + remainingRef.current;
+    }
+
+    setPhase("playing");
+
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
   }
 
-  function restart() {
-    sessionRef.current += 1;
-    requestRef.current = false;
-    setRound(0);
-    setGuess("");
-    setDiscoveries([]);
-    setReveal(null);
-    setShownScore(0);
-    setError("");
-    setBusy(false);
-    setNewBest(false);
-    setCopied(false);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }
+  // -------------------------------------
+  // SHARE RESULTS
+  // -------------------------------------
 
-  async function share() {
-    const lines = [
-      "OBSCURE WORDS ◆ 5/5",
-      ...discoveries.map((entry, i) => `${i + 1}. ${entry.word.toUpperCase()} · ${entry.rarity}`),
-      `TOTAL: ${score}/500`,
-      "playobscure.com/words",
-    ];
+  async function shareResults() {
+    const text = [
+      `OBSCURE WORDS · ${durationName}`,
+      `Score: ${score}/500`,
+      `Discoveries: ${discoveries.length}/5`,
+      ...discoveries.map(
+        (item, i) =>
+          `${i + 1}. ${item.rarity} points`
+      ),
+      "https://playobscure.com/words",
+    ].join("\n");
+
     try {
-      await navigator.clipboard.writeText(lines.join("\n"));
+      await navigator.clipboard.writeText(text);
       setCopied(true);
     } catch {
-      setCopied(false);
+      setError("Couldn't copy your results.");
     }
   }
 
-  const grade = reveal ? getGrade(reveal.rarity) : null;
+  const grade = reveal
+    ? rarityGrade(reveal.rarity)
+    : null;
+
+  // -------------------------------------
+  // INTERFACE
+  // -------------------------------------
 
   return (
-    <main className="po-words relative min-h-screen bg-[#0b100f] text-[#f3f5ee] antialiased">
-      <style>{`
-        @keyframes po-rise { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        @keyframes po-pop { 0% { opacity: 0; transform: translateY(14px) scale(.83); } 65% { opacity: 1; transform: translateY(-4px) scale(1.04); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
-        @keyframes po-glow { 0%, 100% { opacity: .45; transform: scale(1); } 50% { opacity: .8; transform: scale(1.15); } }
-        .po-rise { animation: po-rise .45s both; }
-        .po-pop { animation: po-pop .65s cubic-bezier(.18,.9,.28,1.15) both; }
-        .po-glow { animation: po-glow 3s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) { .po-rise, .po-pop, .po-glow { animation: none !important; } }
-      `}</style>
+    <main className="min-h-screen overflow-x-hidden bg-[#0B100F] px-5 text-[#F0F2EA]">
+      <div className="mx-auto max-w-[850px]">
 
-      <div className="pointer-events-none absolute inset-0 opacity-[.35]" style={{ backgroundImage: "radial-gradient(#7c9384 0.65px, transparent 0.65px)", backgroundSize: "28px 28px" }} />
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[520px] w-[800px] -translate-x-1/2 rounded-full bg-[#b4d974]/[.07] blur-[120px]" />
+        <GameHeader mode="unlimited" />
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[850px] flex-col px-5 pb-10 sm:px-8">
-        <header className="flex items-center justify-between border-b border-white/10 py-6">
-          <Link href="/" className="group flex items-center gap-3" aria-label="Back to Play Obscure arcade">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#d9ff72]/30 bg-[#d9ff72]/10 text-lg text-[#d9ff72] transition-transform group-hover:rotate-12">✳</span>
-            <span className="text-xl font-black tracking-[-.065em]">obscure<span className="text-[#d9ff72]">.</span></span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <span className="hidden text-[11px] font-bold uppercase tracking-[.22em] text-white/35 sm:inline">The word laboratory</span>
-            <span className="rounded-full border border-[#d9ff72]/20 bg-[#d9ff72]/10 px-3 py-1.5 text-[10px] font-extrabold tracking-[.18em] text-[#d9ff72]">WORDS / BETA</span>
+        <section className="pb-24 pt-12 sm:pt-18">
+
+          {/* TITLE */}
+
+          <div className="mb-10 text-center">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#CCF28A]">
+              The word laboratory
+            </p>
+
+            <h1 className="mt-5 text-4xl font-black tracking-[-0.065em] sm:text-6xl">
+              Obscure Words
+              <span className="text-[#CCF28A]">.</span>
+            </h1>
+
+            <p className="mx-auto mt-4 max-w-lg text-sm leading-7 text-white/50">
+              Five prompts. Five discoveries.
+              The less obvious, the better.
+            </p>
           </div>
-        </header>
 
-        <section className="pb-7 pt-11 text-center sm:pb-9 sm:pt-14">
-          <div className="mb-4 flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-[.28em] text-[#d9ff72]">
-            <span className="h-px w-7 bg-[#d9ff72]/50" /> A GAME OF UNCOMMON KNOWLEDGE <span className="h-px w-7 bg-[#d9ff72]/50" />
-          </div>
-          <h1 className="text-[clamp(2.7rem,9vw,4.5rem)] font-black leading-none tracking-[-.075em]">Think of a <span className="italic text-[#d9ff72]">better</span> word.</h1>
-          <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-white/45 sm:text-base">Five prompts. Five answers. The more unexpected your words, the higher you score.</p>
-        </section>
+          {/* TIMER AND PROGRESS */}
 
-        <div className="mb-4 flex items-center justify-between gap-3 px-1 text-xs">
-          <div className="flex items-center gap-2 text-white/45"><span className="text-[#d9ff72]">◆</span> {finished ? "RUN COMPLETED" : `QUESTION ${String(round + 1).padStart(2, "0")} / 05`}</div>
-          <div className="flex items-center gap-5">
-            {best !== null && <span className="hidden text-white/40 sm:inline">BEST <strong className="ml-1 text-white/80">{best}</strong></span>}
-            <span className="text-white/50">SCORE <strong className="ml-1 text-lg text-[#d9ff72]">{score}</strong><span className="text-white/30"> / 500</span></span>
-          </div>
-        </div>
+          {phase !== "setup" && (
+            <>
+              <div className="mb-6 flex items-center justify-between gap-3 border-y border-white/10 py-4 text-sm">
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-white/40">
+                    {durationName} mode
+                  </p>
 
-        <div className="mb-5 grid grid-cols-5 gap-2">
-          {challenges.map((_, index) => (
-            <div key={index} className={`h-1.5 rounded-full transition-colors duration-500 ${index < discoveries.length ? "bg-[#d9ff72]" : index === round && !finished ? "bg-white/50" : "bg-white/10"}`} />
-          ))}
-        </div>
-
-        <div className="relative overflow-hidden rounded-[28px] border border-white/[.13] bg-[#151c19] shadow-[0_25px_90px_rgba(0,0,0,.35)]">
-          <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#d9ff72]/75 to-transparent" />
-
-          {finished ? (
-            <div className="po-rise px-6 py-10 text-center sm:px-12 sm:py-14">
-              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#d9ff72]/30 bg-[#d9ff72]/10 text-3xl text-[#d9ff72]">✳</div>
-              <p className="text-xs font-extrabold uppercase tracking-[.24em] text-[#d9ff72]">Five for five</p>
-              <h2 className="mt-3 text-4xl font-black tracking-[-.055em] sm:text-5xl">Nicely discovered.</h2>
-              <p className="mt-3 text-sm text-white/45">You found five words worth a combined</p>
-              <div className="mt-4 text-7xl font-black leading-none tracking-[-.07em] text-[#d9ff72] sm:text-8xl">{score}<span className="ml-2 text-base font-medium tracking-normal text-white/30">/ 500</span></div>
-              {newBest && <div className="mt-4 text-sm font-bold text-[#f4bf61]">✦ NEW PERSONAL BEST</div>}
-
-              <div className="mt-9 space-y-2 text-left">
-                {discoveries.map((entry, index) => (
-                  <div key={entry.word} className="flex items-center gap-3 rounded-xl border border-white/[.07] bg-white/[.035] px-4 py-3">
-                    <span className="w-6 text-xs text-white/30">0{index + 1}</span>
-                    <span className="min-w-0 flex-1 truncate font-semibold capitalize">{entry.word}</span>
-                    <span className="text-xs font-bold" style={{ color: getGrade(entry.rarity).color }}>{getGrade(entry.rarity).label}</span>
-                    <span className="w-10 text-right text-lg font-black text-[#d9ff72]">{entry.rarity}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-7 grid gap-3 sm:grid-cols-2">
-                <button onClick={share} className="rounded-xl bg-[#d9ff72] px-6 py-4 font-extrabold text-[#10180f] transition hover:bg-[#e9ffa9] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d9ff72]">{copied ? "✓ Results copied" : "↗ Share your words"}</button>
-                <button onClick={restart} className="rounded-xl border border-white/15 bg-white/[.04] px-6 py-4 font-bold transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d9ff72]">Play again →</button>
-              </div>
-              <p className="mt-6 text-xs text-white/30">Personal best saved on this browser. Scores are experimental.</p>
-            </div>
-          ) : reveal && grade ? (
-            <div key={`reveal-${round}`} className="po-rise relative px-6 pb-9 pt-10 text-center sm:px-12 sm:pb-12 sm:pt-14" aria-live="polite">
-              <div className="po-glow pointer-events-none absolute left-1/2 top-16 h-44 w-44 -translate-x-1/2 rounded-full blur-[75px]" style={{ backgroundColor: grade.color, opacity: 0.16 }} />
-              <div className="relative">
-                <p className="text-[11px] font-bold uppercase tracking-[.26em] text-white/40">Discovery confirmed</p>
-                <h2 className="mt-5 break-words text-[clamp(2.4rem,8vw,4.7rem)] font-black capitalize leading-tight tracking-[-.065em]">{reveal.word}</h2>
-                <p className="mt-2 text-xs uppercase tracking-[.22em] text-white/35">Your answer</p>
-                <div className="po-pop mt-9 flex items-baseline justify-center gap-2" style={{ color: grade.color }}>
-                  <span className="text-[clamp(6rem,22vw,10rem)] font-black leading-none tracking-[-.09em] tabular-nums">{shownScore}</span>
-                  <span className="text-xl font-semibold text-white/30">/100</span>
+                  <p className="mt-1 text-xs text-white/40">
+                    {isTimed
+                      ? "Clock pauses on discoveries"
+                      : "No time limit"}
+                  </p>
                 </div>
-                <div className="mt-5 inline-flex items-center gap-2 rounded-full border px-5 py-2 text-[11px] font-black tracking-[.22em]" style={{ borderColor: `${grade.color}55`, backgroundColor: `${grade.color}16`, color: grade.color }}>
-                  <span>✦</span> {grade.label} <span>✦</span>
+
+                <div className="text-right">
+                  <p className="text-xs uppercase tracking-widest text-white/40">
+                    {phase === "reveal"
+                      ? "Time paused"
+                      : phase === "done"
+                        ? "Time at finish"
+                        : "Time remaining"}
+                  </p>
+
+                  <p
+                    className={`mt-1 text-2xl font-black tabular-nums ${
+                      isTimed && timeLeft <= 30000
+                        ? "text-[#f4bf61]"
+                        : "text-[#CCF28A]"
+                    }`}
+                  >
+                    {isTimed
+                      ? timeString(timeLeft)
+                      : "∞"}
+                  </p>
                 </div>
-                <p className="mt-4 text-sm text-white/45">{grade.message}</p>
-                <p className="mt-2 text-xs text-white/30">Provisional score based on English word frequency</p>
-                <button onClick={continueRound} className="mt-10 w-full rounded-xl bg-[#d9ff72] px-6 py-4 text-base font-extrabold text-[#11190e] transition hover:bg-[#e9ffa9] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d9ff72]">
-                  {round === challenges.length - 1 ? "See my results ↗" : "Next question →"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div key={`round-${round}`} className="po-rise px-6 py-8 sm:px-12 sm:py-11">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] font-bold uppercase tracking-[.25em] text-[#d9ff72]">{challenge.label}</p>
-                <span className="text-xs text-white/25">0{round + 1} — 05</span>
               </div>
 
-              <h2 className="mt-7 max-w-2xl text-[clamp(2rem,6vw,3.3rem)] font-extrabold leading-[1.13] tracking-[-.055em]">{challenge.title}</h2>
-              <div className="mt-6 flex flex-wrap gap-2">
-                {challenge.tags.map((tag) => <span key={tag} className="rounded-full border border-white/10 bg-white/[.055] px-3 py-1.5 text-xs text-white/65">{tag}</span>)}
-              </div>
-
-              <form onSubmit={submit} className="mt-10">
-                <label htmlFor="obscure-word" className="mb-3 block text-xs font-semibold uppercase tracking-[.19em] text-white/45">Your answer</label>
-                <input
-                  ref={inputRef}
-                  id="obscure-word"
-                  value={guess}
-                  onChange={(event) => { setGuess(event.target.value); if (error) setError(""); }}
-                  disabled={busy}
-                  maxLength={24}
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  placeholder="Type something unexpected..."
-                  className="w-full rounded-xl border border-white/15 bg-[#0a100e] px-5 py-5 text-lg font-medium text-white outline-none transition placeholder:text-white/25 focus:border-[#d9ff72] focus:ring-2 focus:ring-[#d9ff72]/10 disabled:opacity-50 sm:text-xl"
+              {phase !== "loading" && (
+                <GameProgress
+                  completed={discoveries.length}
+                  score={score}
+                  best={best}
+                  finished={phase === "done"}
                 />
-                <button type="submit" disabled={busy || !guess.trim()} className="mt-3 flex w-full items-center justify-between rounded-xl bg-[#d9ff72] px-6 py-4 text-base font-extrabold text-[#11190e] transition hover:bg-[#e9ffa9] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d9ff72]">
-                  <span>{busy ? "Checking your word..." : "Reveal my score"}</span><span aria-hidden="true">↗</span>
-                </button>
-              </form>
-
-              {error && <p role="status" className="po-rise mt-4 rounded-lg border border-[#f4bf61]/20 bg-[#f4bf61]/10 px-4 py-3 text-sm leading-6 text-[#f4d6a0]">{error}</p>}
-              <div className="mt-8 flex items-center gap-2 border-t border-white/[.08] pt-5 text-xs leading-5 text-white/35">
-                <span className="text-base text-[#d9ff72]">✳</span> Unusual answers score higher. Wrong guesses cost nothing.
-              </div>
-            </div>
+              )}
+            </>
           )}
-        </div>
 
-        {!finished && discoveries.length > 0 && (
-          <section className="mt-5 rounded-2xl border border-white/[.09] bg-[#121815]/90 p-5 sm:p-6">
-            <div className="mb-4 flex items-center justify-between text-xs">
-              <h3 className="font-bold uppercase tracking-[.17em] text-white/65">Your collection</h3>
-              <span className="text-white/35">{discoveries.length} / 5</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {discoveries.map((entry) => (
-                <span key={entry.word} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[.05] px-3 py-2 text-sm">
-                  <span className="capitalize text-white/80">{entry.word}</span><span className="font-bold text-[#d9ff72]">+{entry.rarity}</span>
-                </span>
-              ))}
-            </div>
-          </section>
-        )}
+          <GamePanel>
+            <div className="px-6 py-10 sm:px-10 sm:py-12">
 
-        <footer className="mt-auto pt-10 text-center text-xs leading-6 text-white/30">
-          A little vocabulary goes a long way. <span className="mx-2 text-white/15">✳</span> 50,000 candidate words and counting.
-          <div className="mt-1">A missing word isn't necessarily invalid. Rarity scores are experimental.</div>
-        </footer>
+              {/* GAME SETUP */}
+
+              {phase === "setup" ? (
+                <div className="py-4 text-center">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#CCF28A]">
+                    Choose your pace
+                  </p>
+
+                  <h2 className="mt-5 text-3xl font-bold tracking-tight">
+                    Ready to get obscure?
+                  </h2>
+
+                  <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-white/50">
+                    Five randomized word challenges.
+                    Choose a timer, or take as long
+                    as you like.
+                  </p>
+
+                  <div className="mt-10 grid grid-cols-2 gap-3 text-left sm:grid-cols-4">
+                    {settings.map((option) => (
+                      <button
+                        key={option.value}
+                        onClick={() =>
+                          setDuration(option.value)
+                        }
+                        aria-pressed={
+                          duration === option.value
+                        }
+                        className={`rounded-xl border px-3 py-5 transition ${
+                          duration === option.value
+                            ? "border-[#CCF28A] bg-[#CCF28A]/10"
+                            : "border-white/15 bg-white/[0.025] hover:border-white/35"
+                        }`}
+                      >
+                        <span
+                          className={`block text-sm font-bold ${
+                            duration === option.value
+                              ? "text-[#CCF28A]"
+                              : "text-white/85"
+                          }`}
+                        >
+                          {option.title}
+                        </span>
+
+                        <span className="mt-2 block text-xs text-white/45">
+                          {option.description}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={startGame}
+                    className={`${button} mt-9 w-full`}
+                  >
+                    START UNLIMITED →
+                  </button>
+
+                  <p className="mt-6 text-xs text-white/35">
+                    Your personal best is tracked
+                    separately for each time setting.
+                  </p>
+                </div>
+
+              ) : phase === "loading" ? (
+
+                /* LOADING */
+
+                <div className="py-20 text-center">
+                  <p className="text-4xl text-[#CCF28A]">
+                    ✳
+                  </p>
+
+                  <h2 className="mt-5 text-xl font-bold">
+                    Preparing new questions...
+                  </h2>
+                </div>
+
+              ) : phase === "done" ? (
+
+                /* RESULTS */
+
+                <div className="py-4 text-center">
+                  <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#CCF28A]">
+                    {timedOut
+                      ? "Time's up"
+                      : discoveries.length === 5
+                        ? "Five for five"
+                        : "Run ended"}
+                  </p>
+
+                  <h2 className="mt-5 text-3xl font-black tracking-tight sm:text-4xl">
+                    {timedOut
+                      ? "That's your final score."
+                      : "Nicely discovered."}
+                  </h2>
+
+                  <p className="mt-4 text-sm text-white/45">
+                    {discoveries.length} of 5
+                    questions completed · {durationName}
+                  </p>
+
+                  <div className="my-9 text-7xl font-black tracking-tight text-[#CCF28A] sm:text-8xl">
+                    {score}
+                    <span className="ml-2 text-lg font-medium text-white/30">
+                      /500
+                    </span>
+                  </div>
+
+                  {newBest && (
+                    <p className="mb-8 text-sm font-bold text-[#f4bf61]">
+                      ✦ NEW PERSONAL BEST
+                    </p>
+                  )}
+
+                  <div className="rounded-xl border border-white/10 bg-white/[0.025] px-4 text-left sm:px-6">
+                    {discoveries.length ? (
+                      discoveries.map((entry, i) => (
+                        <DiscoveryRow
+                          key={`${entry.word}-${i}`}
+                          index={i}
+                          word={entry.word}
+                          rarity={entry.rarity}
+                          subtitle={entry.prompt}
+                        />
+                      ))
+                    ) : (
+                      <p className="py-7 text-center text-sm text-white/45">
+                        No answers recorded this round.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mt-8 grid gap-3 sm:grid-cols-2">
+                    <button
+                      onClick={shareResults}
+                      className={button}
+                    >
+                      {copied
+                        ? "COPIED!"
+                        : "SHARE RESULTS ↗"}
+                    </button>
+
+                    <button
+                      onClick={startGame}
+                      className="min-h-14 rounded-xl border border-white/20 px-6 font-bold transition hover:bg-white/10"
+                    >
+                      PLAY NEW QUESTIONS →
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => setPhase("setup")}
+                    className="mt-6 text-sm text-white/50 underline-offset-4 hover:text-white hover:underline"
+                  >
+                    Change time setting
+                  </button>
+
+                  {error && (
+                    <p className="mt-4 text-sm text-[#f4bf61]">
+                      {error}
+                    </p>
+                  )}
+                </div>
+
+              ) : phase === "reveal" && reveal && grade ? (
+
+                /* SCORE REVEAL */
+
+                <div
+                  className="py-6 text-center"
+                  aria-live="polite"
+                >
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#CCF28A]">
+                    Discovery {discoveries.length} / 5
+                  </p>
+
+                  <h2 className="mt-9 break-words text-4xl font-black capitalize tracking-tight sm:text-5xl">
+                    {reveal.word}
+                  </h2>
+
+                  <div
+                    className="mt-7 flex items-baseline justify-center gap-2"
+                    style={{ color: grade.color }}
+                  >
+                    <span className="text-7xl font-black tabular-nums sm:text-8xl">
+                      {shownScore}
+                    </span>
+
+                    <span className="text-lg text-white/30">
+                      /100
+                    </span>
+                  </div>
+
+                  <p
+                    className="mt-6 text-xs font-bold tracking-[0.25em]"
+                    style={{ color: grade.color }}
+                  >
+                    ✦ {grade.label} ✦
+                  </p>
+
+                  <p className="mt-5 text-sm text-white/45">
+                    {isTimed
+                      ? `Clock paused · ${timeString(
+                          timeLeft
+                        )} remaining`
+                      : "Take your time. There's no clock."}
+                  </p>
+
+                  <button
+                    onClick={continueRound}
+                    className={`${button} mt-9 w-full`}
+                  >
+                    {round === challenges.length - 1
+                      ? "SEE FINAL RESULTS →"
+                      : "NEXT QUESTION →"}
+                  </button>
+                </div>
+
+              ) : (
+
+                /* ACTIVE QUESTION */
+
+                <div className="py-3 sm:py-7">
+                  <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-widest text-[#CCF28A]">
+                    <span>{activePrompt.label}</span>
+                    <span className="text-white/40">
+                      {round + 1} / 5
+                    </span>
+                  </div>
+
+                  <h2 className="mt-10 text-3xl font-black leading-tight tracking-tight sm:text-4xl">
+                    {activePrompt.title}
+                  </h2>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {activePrompt.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-white/55"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+
+                  <form
+                    onSubmit={submit}
+                    className="mt-10"
+                  >
+                    <label
+                      htmlFor="word-answer"
+                      className="mb-3 block text-xs font-semibold uppercase tracking-widest text-white/50"
+                    >
+                      Your answer
+                    </label>
+
+                    <input
+                      id="word-answer"
+                      ref={inputRef}
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      maxLength={24}
+                      disabled={busy}
+                      value={guess}
+                      onChange={(event) => {
+                        setGuess(event.target.value);
+                        setError("");
+                      }}
+                      placeholder="Think of something uncommon..."
+                      className="w-full border-b border-white/25 bg-transparent px-1 py-5 text-xl outline-none placeholder:text-white/25 focus:border-[#CCF28A]"
+                    />
+
+                    <button
+                      type="submit"
+                      disabled={busy || !guess.trim()}
+                      className={`${button} mt-8 w-full`}
+                    >
+                      {busy
+                        ? "CHECKING..."
+                        : "SUBMIT WORD →"}
+                    </button>
+                  </form>
+
+                  {error && (
+                    <p
+                      role="status"
+                      className="mt-6 text-sm text-[#f4bf61]"
+                    >
+                      {error}
+                    </p>
+                  )}
+
+                  <p className="mt-8 text-xs text-white/35">
+                    Wrong guesses cost no points.
+                    The clock keeps running while you think.
+                  </p>
+
+                  {notice && (
+                    <p className="mt-4 text-xs text-[#f4bf61]">
+                      {notice}
+                    </p>
+                  )}
+
+                  <button
+                    onClick={() => finishRun()}
+                    className="mt-8 text-xs text-white/40 underline-offset-4 hover:text-white hover:underline"
+                  >
+                    End run early
+                  </button>
+                </div>
+              )}
+            </div>
+          </GamePanel>
+
+          {/* DISCOVERY HISTORY */}
+
+          {phase !== "setup" &&
+            phase !== "done" &&
+            discoveries.length > 0 && (
+              <div className="mt-7 border-t border-white/10 pt-6">
+                <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-white/45">
+                  Your discoveries
+                </p>
+
+                <div className="flex flex-wrap gap-2">
+                  {discoveries.map((item) => (
+                    <span
+                      key={item.word}
+                      className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/80"
+                    >
+                      {item.word}{" "}
+                      <span className="font-bold text-[#CCF28A]">
+                        +{item.rarity}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          <div className="mt-12 border-t border-white/10 pt-7 text-center text-sm text-white/45">
+            Ready for tomorrow's challenge?
+            <Link
+              href="/daily"
+              className="ml-2 font-semibold text-[#CCF28A] hover:underline"
+            >
+              Daily Dive →
+            </Link>
+          </div>
+        </section>
       </div>
     </main>
   );

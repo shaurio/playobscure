@@ -1,0 +1,682 @@
+
+"use client";
+
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
+import {
+  GameHeader,
+  GameProgress,
+  GamePanel,
+  DiscoveryRow,
+} from "@/components/game/GameUI";
+
+type Challenge = {
+  id: string;
+  title: string;
+  startsWith?: string;
+  contains?: string;
+  length?: number;
+};
+
+type WordResponse = {
+  recognized: boolean;
+  eligible: boolean | null;
+  word: string;
+  rarity?: number;
+  tier?: number;
+  message?: string;
+};
+
+type Discovery = {
+  word: string;
+  rarity: number;
+  tier: number;
+  prompt: string;
+};
+
+type DailyRun = {
+  prompts: Challenge[];
+  round: number;
+  discoveries: Discovery[];
+  phase: "guessing" | "reveal" | "done";
+  remainingMs: number;
+  deadlineMs: number | null;
+};
+
+const LIMIT_MS = 3 * 60 * 1000;
+
+function clock(ms: number) {
+  const seconds = Math.ceil(Math.max(0, ms) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function scoreLabel(score: number) {
+  if (score >= 81) return "OBSCURE";
+  if (score >= 61) return "DEEP CUT";
+  if (score >= 41) return "CURIOUS";
+  if (score >= 21) return "FAMILIAR";
+  return "COMMON";
+}
+
+export default function DailyPage() {
+  const [day, setDay] = useState("");
+  const [prompts, setPrompts] = useState<Challenge[]>([]);
+  const [run, setRun] = useState<DailyRun | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [guess, setGuess] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(LIMIT_MS);
+  const [copied, setCopied] = useState(false);
+
+  const runRef = useRef<DailyRun | null>(null);
+  const keyRef = useRef("");
+  const requestRef = useRef(false);
+
+  function save(next: DailyRun) {
+    runRef.current = next;
+    setRun(next);
+
+    const left =
+      next.phase === "guessing" && next.deadlineMs !== null
+        ? Math.max(0, next.deadlineMs - Date.now())
+        : next.remainingMs;
+
+    setTimeLeft(left);
+
+    try {
+      localStorage.setItem(keyRef.current, JSON.stringify(next));
+    } catch {
+      // Storage may be unavailable in private browsing.
+    }
+  }
+
+  // Load today's shared prompts, or resume an existing run.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initialize() {
+      const date = new Date().toISOString().slice(0, 10);
+      const key = `playobscure:daily:v1:${date}`;
+
+      keyRef.current = key;
+      setDay(date);
+
+      try {
+        const stored = localStorage.getItem(key);
+
+        if (stored) {
+          const saved = JSON.parse(stored) as DailyRun;
+
+          if (
+            Array.isArray(saved.prompts) &&
+            saved.prompts.length === 5 &&
+            ["guessing", "reveal", "done"].includes(saved.phase) &&
+            Number.isFinite(saved.remainingMs)
+          ) {
+            if (cancelled) return;
+
+            if (
+              saved.phase === "guessing" &&
+              (!saved.deadlineMs || saved.deadlineMs <= Date.now())
+            ) {
+              saved.phase = "done";
+              saved.remainingMs = 0;
+              saved.deadlineMs = null;
+            }
+
+            setPrompts(saved.prompts);
+            save(saved);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // Malformed or unavailable storage: start fresh.
+      }
+
+      try {
+        const response = await fetch(
+          `/api/word/prompts?seed=daily-${date}&count=5`,
+          { cache: "no-store" }
+        );
+
+        if (!response.ok) throw new Error("Prompt service unavailable");
+
+        const result = (await response.json()) as {
+          prompts: Challenge[];
+        };
+
+        if (!Array.isArray(result.prompts) || result.prompts.length !== 5) {
+          throw new Error("Incomplete daily challenge");
+        }
+
+        if (!cancelled) setPrompts(result.prompts);
+      } catch {
+        if (!cancelled) {
+          setError("Couldn't load today's challenge. Refresh to retry.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void initialize();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Use wall-clock deadlines so refreshing cannot replenish time.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const current = runRef.current;
+
+      if (current?.phase !== "guessing" || current.deadlineMs === null) {
+        return;
+      }
+
+      const remaining = Math.max(0, current.deadlineMs - Date.now());
+      setTimeLeft(remaining);
+
+      if (remaining === 0) {
+        save({
+          ...current,
+          phase: "done",
+          remainingMs: 0,
+          deadlineMs: null,
+        });
+      }
+    }, 200);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  function start() {
+    if (runRef.current || prompts.length !== 5) return;
+
+    setError("");
+
+    save({
+      prompts,
+      round: 0,
+      discoveries: [],
+      phase: "guessing",
+      remainingMs: LIMIT_MS,
+      deadlineMs: Date.now() + LIMIT_MS,
+    });
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const current = runRef.current;
+
+    if (
+      !current ||
+      current.phase !== "guessing" ||
+      requestRef.current
+    ) {
+      return;
+    }
+
+    const word = guess.trim().toLowerCase();
+
+    if (!/^[a-z]{3,24}$/.test(word)) {
+      setError("Enter a word containing 3–24 English letters.");
+      return;
+    }
+
+    if (
+      current.deadlineMs === null ||
+      Date.now() >= current.deadlineMs
+    ) {
+      return;
+    }
+
+    const challenge = current.prompts[current.round];
+
+    const params = new URLSearchParams({ word });
+
+    if (challenge.startsWith) {
+      params.set("startsWith", challenge.startsWith);
+    }
+
+    if (challenge.contains) {
+      params.set("contains", challenge.contains);
+    }
+
+    if (challenge.length !== undefined) {
+      params.set("length", String(challenge.length));
+    }
+
+    requestRef.current = true;
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/word?${params.toString()}`);
+
+      if (!response.ok) throw new Error("Lookup failed");
+
+      const result = (await response.json()) as WordResponse;
+      const latest = runRef.current;
+
+      if (
+        !latest ||
+        latest.phase !== "guessing" ||
+        latest.round !== current.round ||
+        latest.deadlineMs === null ||
+        Date.now() >= latest.deadlineMs
+      ) {
+        return;
+      }
+
+      if (!result.recognized) {
+        setError("Not in our vocabulary yet. Try another word.");
+        return;
+      }
+
+      if (!result.eligible) {
+        setError("Recognized, but that word doesn't fit this prompt.");
+        return;
+      }
+
+      if (
+        latest.discoveries.some(
+          (item) => item.word === result.word
+        )
+      ) {
+        setError("You've already used that word today.");
+        return;
+      }
+
+      if (
+        result.rarity === undefined ||
+        result.tier === undefined
+      ) {
+        setError("We couldn't score that word. Try another.");
+        return;
+      }
+
+      const discovery: Discovery = {
+        word: result.word,
+        rarity: result.rarity,
+        tier: result.tier,
+        prompt: challenge.title,
+      };
+
+      // Accepted answer: stop the clock during the reveal.
+      const remaining = Math.max(
+        0,
+        latest.deadlineMs - Date.now()
+      );
+
+      save({
+        ...latest,
+        discoveries: [...latest.discoveries, discovery],
+        phase: "reveal",
+        remainingMs: remaining,
+        deadlineMs: null,
+      });
+
+      setGuess("");
+    } catch {
+      setError("Couldn't check your answer. Please try again.");
+    } finally {
+      requestRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  function continueRun() {
+    const current = runRef.current;
+    if (!current || current.phase !== "reveal") return;
+
+    const nextRound = current.round + 1;
+    setError("");
+
+    if (nextRound >= current.prompts.length) {
+      save({
+        ...current,
+        round: nextRound,
+        phase: "done",
+        deadlineMs: null,
+      });
+      return;
+    }
+
+    if (current.remainingMs <= 0) {
+      save({
+        ...current,
+        phase: "done",
+        deadlineMs: null,
+      });
+      return;
+    }
+
+    save({
+      ...current,
+      round: nextRound,
+      phase: "guessing",
+      deadlineMs: Date.now() + current.remainingMs,
+    });
+  }
+
+  async function shareResults() {
+    if (!run) return;
+
+    const total = run.discoveries.reduce(
+      (sum, item) => sum + item.rarity,
+      0
+    );
+
+    const text = [
+      `OBSCURE · Daily Dive · ${day}`,
+      `Score: ${total}/500`,
+      `Discoveries: ${run.discoveries.length}/5`,
+      ...run.discoveries.map(
+        (item, i) => `${i + 1}. ${item.rarity} points`
+      ),
+      "https://playobscure.com",
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setError("Clipboard unavailable.");
+    }
+  }
+
+  const current = run?.prompts[
+    Math.min(run.round, run.prompts.length - 1)
+  ];
+
+  const latestDiscovery =
+    run?.discoveries[run.discoveries.length - 1];
+
+  const total = run?.discoveries.reduce(
+    (sum, item) => sum + item.rarity,
+    0
+  ) ?? 0;
+
+  const completed = run?.discoveries.length === 5;
+
+  const button =
+    "inline-flex min-h-14 w-full items-center justify-center rounded-lg bg-[#CCF28A] px-7 font-bold text-[#152017] transition hover:bg-[#E1FFAC] disabled:opacity-40";
+
+  return (
+    <main className="min-h-screen bg-[#0b100f] px-5 text-[#F0F2EA]">
+  <div className="mx-auto max-w-[850px]">
+        <GameHeader mode="daily" />
+          <Link
+            href="/"
+            className="text-2xl font-black tracking-[-0.08em]"
+          >
+            obscure<span className="text-[#CCF28A]">.</span>
+          </Link>
+
+          <nav className="flex gap-6 text-sm text-white/55">
+            <Link href="/words" className="hover:text-white">
+              Unlimited
+            </Link>
+            <Link href="/arcade" className="hover:text-white">
+              Arcade
+            </Link>
+          </nav>
+        </GameHeader>
+
+        <section className="pb-24 pt-16 sm:pt-24">
+          <div className="mb-5 flex items-center gap-3">
+            <span className="h-2 w-2 rounded-full bg-[#CCF28A]" />
+            <span className="text-xs font-semibold uppercase tracking-[0.22em] text-[#CCF28A]">
+              The daily challenge
+            </span>
+          </div>
+
+          <h1 className="text-5xl font-black tracking-[-0.065em] sm:text-6xl">
+            Daily Dive<span className="text-[#CCF28A]">.</span>
+          </h1>
+
+          <p className="mt-5 text-base leading-8 text-[#A5B8AB]">
+            Five words. Three minutes. One attempt.
+          </p>
+
+          <div className="mt-12 flex items-center justify-between border-y border-white/10 py-5">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-white/40">
+                Today's challenge
+              </p>
+              <p className="mt-2 text-sm font-medium">
+                {day || "Loading..."} · UTC
+              </p>
+            </div>
+
+            <div className="text-right">
+              <p className="text-xs uppercase tracking-widest text-white/40">
+                {run?.phase === "done"
+  ? "Time left at finish"
+  : run?.phase === "reveal"
+    ? "Time paused"
+    : "Time remaining"}
+              </p>
+              <p
+                className={`mt-1 text-3xl font-black tabular-nums ${
+                  timeLeft <= 30000 ? "text-[#F4BF61]" : "text-[#CCF28A]"
+                }`}
+              >
+                {clock(timeLeft)}
+              </p>
+            </div>
+          </div>
+
+{run && (
+  <GameProgress
+    completed={run.discoveries.length}
+    score={total}
+    finished={run.phase === "done"}
+  />
+)}
+          <GamePanel>{loading ? (
+            <div className="py-20 text-center text-white/50">
+              Preparing today's challenge...
+            </div>
+          ) : !run ? (
+            <div className="py-16">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#CCF28A]">
+                Ready when you are
+              </p>
+
+              <h2 className="mt-5 text-3xl font-bold tracking-tight">
+                One chance to go obscure.
+              </h2>
+
+              <p className="mt-6 max-w-lg leading-8 text-[#A5B8AB]">
+                You get five word challenges and three minutes
+                of guessing time. Valid answers are final.
+                The clock pauses while you view your results.
+              </p>
+
+              <p className="mt-4 text-sm leading-7 text-white/45">
+                Your progress is saved in this browser.
+                Leaving during a question does not pause the clock.
+              </p>
+
+              <button
+                onClick={start}
+                disabled={prompts.length !== 5}
+                className={`${button} mt-10 max-w-[320px]`}
+              >
+                START TODAY'S DIVE →
+              </button>
+            </div>
+          ) : run.phase === "done" ? (
+            <div className="py-12">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#CCF28A]">
+                {completed ? "DIVE COMPLETE" : "TIME'S UP"}
+              </p>
+
+              <h2 className="mt-5 text-4xl font-bold tracking-tight">
+                {completed
+                  ? "That's your daily score."
+                  : "Your dive has ended."}
+              </h2>
+
+              <p className="mt-8 text-7xl font-black tracking-tight text-[#CCF28A]">
+                {total}
+                <span className="ml-2 text-xl text-white/35">/ 500</span>
+              </p>
+
+              <p className="mt-4 text-sm text-white/50">
+                {run.discoveries.length} of 5 questions completed
+              </p>
+
+              <div className="mt-12 space-y-0 border-t border-white/10">
+                {run.discoveries.map((item, i) => (
+                  <div
+                    key={`${item.word}-${i}`}
+                    className="flex items-center justify-between gap-3 border-b border-white/10 py-5"
+                  >
+                    <div>
+                      <p className="text-lg font-semibold capitalize">
+                        {item.word}
+                      </p>
+                      <p className="mt-1 text-xs text-white/40">
+                        {item.prompt}
+                      </p>
+                    </div>
+                    <span className="text-2xl font-bold text-[#CCF28A]">
+                      +{item.rarity}
+                    </span>
+                  </div>
+                ))}</GamePanel>
+              </div>
+
+              <button
+                onClick={shareResults}
+                className={`${button} mt-10`}
+              >
+                {copied ? "COPIED!" : "SHARE RESULTS ↗"}
+              </button>
+
+              <p className="mt-6 text-center text-sm text-white/45">
+                Come back tomorrow for a new Daily Dive.
+              </p>
+            </div>
+          ) : run.phase === "reveal" && latestDiscovery ? (
+            <div className="py-12 text-center">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#CCF28A]">
+                DISCOVERY {run.round + 1} / 5
+              </p>
+
+              <h2 className="mt-12 break-words text-4xl font-bold tracking-tight capitalize sm:text-5xl">
+                {latestDiscovery.word}
+              </h2>
+
+              <p className="mt-8 text-7xl font-black text-[#CCF28A]">
+                {latestDiscovery.rarity}
+                <span className="ml-2 text-xl text-white/35">/ 100</span>
+              </p>
+
+              <p className="mt-5 text-xs font-semibold tracking-[0.25em] text-[#CCF28A]">
+                ✦ {scoreLabel(latestDiscovery.rarity)} ✦
+              </p>
+
+              <p className="mt-10 text-sm text-white/50">
+                Clock paused · {clock(run.remainingMs)} remaining
+              </p>
+
+              <button
+                onClick={continueRun}
+                className={`${button} mt-10`}
+              >
+                {run.round === 4 ? "SEE FINAL RESULTS →" : "NEXT QUESTION →"}
+              </button>
+            </div>
+          ) : (
+            <div className="py-12">
+              <div className="mb-8 flex items-center justify-between text-xs font-semibold tracking-[0.14em] text-white/45">
+                <span>QUESTION {run.round + 1} / 5</span>
+                <span>{total} POINTS</span>
+              </div>
+
+              <div className="mb-12 flex gap-2">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className={`h-1.5 flex-1 rounded-full ${
+                      i < run.round ? "bg-[#CCF28A]" : "bg-white/15"
+                    }`}
+                  />
+                ))}
+              </div>
+
+              <h2 className="max-w-[650px] text-3xl font-bold leading-[1.3] tracking-[-0.04em] sm:text-4xl">
+                {current?.title}
+              </h2>
+
+              <form onSubmit={submit} className="mt-12">
+                <label
+                  htmlFor="daily-answer"
+                  className="mb-3 block text-sm text-white/55"
+                >
+                  Your answer
+                </label>
+
+                <input
+                  id="daily-answer"
+                  autoFocus
+                  value={guess}
+                  onChange={(e) => setGuess(e.target.value)}
+                  disabled={busy}
+                  maxLength={24}
+                  autoComplete="off"
+                  placeholder="Think of something obscure..."
+                  className="w-full border-b border-white/25 bg-transparent px-1 py-5 text-xl outline-none placeholder:text-white/25 focus:border-[#CCF28A]"
+                />
+
+                <button
+                  type="submit"
+                  disabled={busy || !guess.trim() || timeLeft <= 0}
+                  className={`${button} mt-8`}
+                >
+                  {busy ? "CHECKING..." : "SUBMIT ANSWER →"}
+                </button>
+              </form>
+
+              {error && (
+                <p
+                  role="status"
+                  className="mt-6 text-sm text-[#F4BF61]"
+                >
+                  {error}
+                </p>
+              )}
+
+              <p className="mt-9 text-xs leading-6 text-white/35">
+                Invalid answers don't consume a question.
+                Your first valid submission is final.
+              </p>
+            </div>
+          )}
+
+          {error && run?.phase === "done" && (
+            <p className="mt-6 text-sm text-[#F4BF61]">{error}</p>
+          )}
+
+          <div className="mt-10 border-t border-white/10 pt-7 text-center text-sm text-white/45">
+            Want more?
+            <Link
+              href="/words"
+              className="ml-2 font-semibold text-[#CCF28A] hover:underline"
+            >
+              Play Unlimited →
+            </Link>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}

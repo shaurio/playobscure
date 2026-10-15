@@ -1,0 +1,19 @@
+Play Obscure — Word Data Attribution
+
+English word frequency data derived from wordfreq
+by Robyn Speer:
+https://github.com/rspeer/wordfreq
+
+This is a modified subset: filtered English words,
+with game-specific obscurity scores computed from
+wordfreq frequency estimates.
+
+Source data: Creative Commons Attribution-ShareAlike 4.0
+https://creativecommons.org/licenses/by-sa/4.0/
+
+Credits also go to the SUBTLEX authors, including
+Marc Brysbaert and colleagues. SUBTLEX is freely
+available data.
+
+Other contributing sources and full attribution:
+https://github.com/rspeer/wordfreq/blob/master/NOTICE.md

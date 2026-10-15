@@ -24,3 +24,60 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+:root {
+  --obscure-accent: #d9ff6b;
+}
+
+body {
+  background: #090b0d;
+  color: #f5f6f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #d9ff6b;
+  color: #090b0d;
+}
+
+.obscure-glow {
+  background:
+    radial-gradient(
+      ellipse 65% 45% at 50% -10%,
+      rgba(176, 255, 94, 0.12),
+      transparent 75%
+    ),
+    #090b0d;
+}
+
+.obscure-card {
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.065),
+    rgba(255, 255, 255, 0.018)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow: 0 16px 60px rgba(0, 0, 0, 0.18);
+}
+
+.obscure-answer {
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.obscure-answer:hover {
+  transform: translateY(-2px);
+  background: rgba(217, 255, 107, 0.07);
+  border-color: rgba(217, 255, 107, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .obscure-answer {
+    transition: none;
+  }
+  .obscure-answer:hover {
+    transform: none;
+  }
+}

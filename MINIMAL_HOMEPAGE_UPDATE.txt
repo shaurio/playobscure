@@ -1,0 +1,18 @@
+Obscure: original homepage + blue/purple animated background
+
+Contents: app/page.tsx, app/home-ambient.css, components/home-ambient.tsx, components/hero-headline.tsx
+
+This resets the homepage to the version in your original uploaded obscure-source.zip and only adds a moving gradient, pointer-following glow, and reactive hero title.
+
+WARNING: app/page.tsx is overwritten. Run git diff app/page.tsx before committing.
+If you added import "./home.module.css" to app/layout.tsx earlier, remove that import.
+The older fluid homepage's app/home.css may remain on disk but is not imported by the new homepage.
+
+Install from your project folder:
+  unzip -o ~/Downloads/obscure-minimal-homepage.zip
+  npm run dev
+
+Once tested:
+  npm run build
+
+All game routes, scoring files, data files, and package.json stay unchanged.

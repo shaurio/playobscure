@@ -7,8 +7,8 @@ OUTPUT = Path("data/english-words.json")
 OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 
 # Retrieve the 100,000 highest-frequency candidates.
-# We retain the first 50,000 alphabetic words.
-candidates = top_n_list("en", 100000)
+# We retain the first 100,000 alphabetic words.
+candidates = top_n_list("en", 250000)
 
 words = []
 seen = set()
@@ -45,7 +45,7 @@ for word in candidates:
         "tier": min(5, (obscurity - 1) // 20 + 1),
     })
 
-    if len(words) >= 50000:
+    if len(words) >= 100000:
         break
 
 OUTPUT.write_text(

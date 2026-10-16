@@ -28,6 +28,7 @@ type WordResponse = {
   eligible: boolean | null;
   word: string;
   rarity?: number;
+  rarityPercentile?: number | null;
   tier?: number;
   message?: string;
 };
@@ -35,6 +36,7 @@ type WordResponse = {
 type Discovery = {
   word: string;
   rarity: number;
+  rarityPercentile?: number | null;
   tier: number;
   prompt: string;
 };
@@ -134,7 +136,7 @@ export default function DailyPage() {
     async function initialize() {
       // Everyone uses the same UTC date and prompt seed.
       const date = new Date().toISOString().slice(0, 10);
-      const storageKey = `playobscure:daily:v1:${date}`;
+      const storageKey = `playobscure:daily:v2:${date}`;
 
       keyRef.current = storageKey;
       setDay(date);
@@ -410,6 +412,7 @@ export default function DailyPage() {
       const discovery: Discovery = {
         word: result.word,
         rarity: result.rarity,
+        rarityPercentile: result.rarityPercentile,
         tier: result.tier,
         prompt: challenge.title,
       };
@@ -791,6 +794,11 @@ export default function DailyPage() {
                   <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#CCF28A]">
                     ✦ {scoreLabel(latestDiscovery.rarity)} ✦
                   </p>
+                  {latestDiscovery.rarityPercentile != null && (
+                    <p className="mt-3 text-sm text-white/70">
+                      Rarer than {latestDiscovery.rarityPercentile}% of valid answers
+                    </p>
+                  )}
 
                   <p className="mt-10 text-sm text-white/45">
                     Clock paused · {formatTime(run.remainingMs)} remaining

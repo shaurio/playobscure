@@ -2,12 +2,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-type WordEntry = {
-  word: string;
-  length: number;
-  first: string;
-};
-
 export type WordPrompt = {
   id: string;
   title: string;
@@ -21,151 +15,42 @@ type Candidate = WordPrompt & {
   family: string;
 };
 
+// This is our frozen, versioned prompt pool.
+// Expanding the vocabulary will not automatically
+// change the available daily questions.
+const POOL_VERSION = "v1";
+
 let cachedPool: Promise<Candidate[]> | null = null;
 
-const alphabet = "abcdefghijklmnopqrstuvwxyz";
-
-function makeTemplates() {
-  const templates: Omit<Candidate, "eligibleCount">[] = [];
-
-  function add(
-    family: string,
-    title: string,
-    constraints: {
-      startsWith?: string;
-      contains?: string;
-      length?: number;
-    }
-  ) {
-    const id = [
-      family,
-      constraints.startsWith ?? "",
-      constraints.contains ?? "",
-      constraints.length ?? "",
-    ].join("-");
-
-    templates.push({
-      id,
-      title,
-      family,
-      ...constraints,
-    });
-  }
-
-  for (let length = 4; length <= 12; length++) {
-    add(
-      "length",
-      `Name a ${length}-letter English word`,
-      { length }
-    );
-  }
-
-  for (const letter of alphabet) {
-    add(
-      "starts",
-      `Name a word beginning with ${letter.toUpperCase()}`,
-      { startsWith: letter }
-    );
-
-    add(
-      "contains",
-      `Name a word containing ${letter.toUpperCase()}`,
-      { contains: letter }
-    );
-
-    for (let length = 4; length <= 10; length++) {
-      add(
-        "length-starts",
-        `Name a ${length}-letter word beginning with ${letter.toUpperCase()}`,
-        { startsWith: letter, length }
-      );
-
-      add(
-        "length-contains",
-        `Name a ${length}-letter word containing ${letter.toUpperCase()}`,
-        { contains: letter, length }
-      );
-    }
-  }
-
-  const commonLetters = "aeiourstln";
-
-  for (const first of alphabet) {
-    for (const included of commonLetters) {
-      if (first === included) continue;
-
-      add(
-        "starts-contains",
-        `Name a word beginning with ${first.toUpperCase()} that contains ${included.toUpperCase()}`,
-        {
-          startsWith: first,
-          contains: included,
-        }
-      );
-    }
-  }
-
-  return templates;
-}
-
-function matches(
-  word: WordEntry,
-  prompt: Omit<Candidate, "eligibleCount">
-) {
-  if (prompt.length !== undefined && word.length !== prompt.length) {
-    return false;
-  }
-
-  if (prompt.startsWith && word.first !== prompt.startsWith) {
-    return false;
-  }
-
-  if (prompt.contains && !word.word.includes(prompt.contains)) {
-    return false;
-  }
-
-  return true;
-}
-
-async function buildPool(): Promise<Candidate[]> {
-  const file = path.join(
-    process.cwd(),
-    "data",
-    "english-words.json"
-  );
-
-  const raw = await readFile(file, "utf8");
-  const words = JSON.parse(raw) as WordEntry[];
-
-  const templates = makeTemplates();
-
-  return templates.flatMap((template) => {
-    const eligibleCount = words.reduce(
-      (count, word) => count + Number(matches(word, template)),
-      0
-    );
-
-    // Avoid impossible or overly restrictive prompts.
-    if (eligibleCount < 40 || eligibleCount > 12000) {
-      return [];
-    }
-
-    return [{ ...template, eligibleCount }];
-  });
-}
-
-async function getPool() {
+async function getPool(): Promise<Candidate[]> {
   if (!cachedPool) {
-    cachedPool = buildPool().catch((error) => {
-      cachedPool = null;
-      throw error;
-    });
+    const filepath = path.join(
+      process.cwd(),
+      "data",
+      `word-prompt-pool-${POOL_VERSION}.json`
+    );
+
+    cachedPool = readFile(filepath, "utf8")
+      .then((contents) => {
+        const parsed: unknown = JSON.parse(contents);
+
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          throw new Error("Prompt pool is empty or invalid.");
+        }
+
+        return parsed as Candidate[];
+      })
+      .catch((error) => {
+        cachedPool = null;
+        throw error;
+      });
   }
 
   return cachedPool;
 }
 
-// Reproducible randomness from a seed.
+// Deterministic random-number generator.
+// Identical seed + identical pool = identical results.
 function seededRandom(seed: string) {
   let state = 2166136261;
 
@@ -174,8 +59,9 @@ function seededRandom(seed: string) {
     state = Math.imul(state, 16777619);
   }
 
-  return function random() {
+  return function random(): number {
     state += 0x6d2b79f5;
+
     let value = state;
 
     value = Math.imul(
@@ -189,16 +75,21 @@ function seededRandom(seed: string) {
     );
 
     return (
-      ((value ^ (value >>> 14)) >>> 0) / 4294967296
+      ((value ^ (value >>> 14)) >>> 0) /
+      4294967296
     );
   };
 }
 
-function shuffle<T>(items: T[], random: () => number): T[] {
+function shuffle<T>(
+  items: T[],
+  random: () => number
+): T[] {
   const copy = [...items];
 
   for (let i = copy.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
+
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
 
@@ -212,20 +103,20 @@ export async function generateWordPrompts(
   const pool = await getPool();
   const random = seededRandom(seed);
 
+  // We favor different challenge styles.
   const families = shuffle(
-    [...new Set(pool.map((prompt) => prompt.family))],
+    [...new Set(pool.map((item) => item.family))],
     random
   );
 
   const selected: Candidate[] = [];
   const used = new Set<string>();
 
-  // Favor different styles of questions.
   for (const family of families) {
     if (selected.length >= count) break;
 
     const options = pool.filter(
-      (prompt) => prompt.family === family
+      (item) => item.family === family
     );
 
     const pick = shuffle(options, random)[0];
@@ -236,13 +127,13 @@ export async function generateWordPrompts(
     }
   }
 
-  // Fill any remaining slots without repeating prompts.
-  for (const prompt of shuffle(pool, random)) {
+  // Fill any remaining slots using other prompts.
+  for (const candidate of shuffle(pool, random)) {
     if (selected.length >= count) break;
 
-    if (!used.has(prompt.id)) {
-      selected.push(prompt);
-      used.add(prompt.id);
+    if (!used.has(candidate.id)) {
+      selected.push(candidate);
+      used.add(candidate.id);
     }
   }
 

@@ -26,6 +26,7 @@ type Challenge = {
 type Discovery = {
   word: string;
   rarity: number;
+  rarityPercentile?: number | null;
   tier: number;
   prompt: string;
 };
@@ -35,6 +36,7 @@ type WordResult = {
   eligible: boolean | null;
   word: string;
   rarity?: number;
+  rarityPercentile?: number | null;
   tier?: number;
 };
 
@@ -105,7 +107,7 @@ function rarityGrade(value: number) {
 }
 
 function bestKey(duration: Duration) {
-  return `playobscure:words:best:v2:${duration}`;
+  return `playobscure:words:best:v3:${duration}`;
 }
 
 function displayChallenge(item: {
@@ -193,12 +195,7 @@ export default function WordsPage() {
   useEffect(() => {
     try {
       const stored =
-        window.localStorage.getItem(bestKey(duration)) ??
-        (duration === "relaxed"
-          ? window.localStorage.getItem(
-              "playobscure:words:best:v1"
-            )
-          : null);
+        window.localStorage.getItem(bestKey(duration));
 
       setBest(
         stored !== null && Number.isFinite(Number(stored))
@@ -291,13 +288,7 @@ export default function WordsPage() {
 
     try {
       const previous = Number(
-        window.localStorage.getItem(bestKey(duration)) ??
-          (duration === "relaxed"
-            ? window.localStorage.getItem(
-                "playobscure:words:best:v1"
-              )
-            : null) ??
-          0
+        window.localStorage.getItem(bestKey(duration)) ?? 0
       );
 
       if (score > previous) {
@@ -524,6 +515,7 @@ export default function WordsPage() {
       const entry: Discovery = {
         word: result.word,
         rarity: result.rarity,
+        rarityPercentile: result.rarityPercentile,
         tier: result.tier,
         prompt: activePrompt.title,
       };
@@ -917,6 +909,11 @@ export default function WordsPage() {
                   >
                     ✦ {grade.label} ✦
                   </p>
+                  {reveal.rarityPercentile != null && (
+                    <p className="mt-3 text-sm text-white/70">
+                      Rarer than {reveal.rarityPercentile}% of valid answers
+                    </p>
+                  )}
 
                   <p className="mt-5 text-sm text-white/45">
                     {isTimed

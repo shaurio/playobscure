@@ -1,6 +1,9 @@
 
 import Link from "next/link";
 import type { Metadata } from "next";
+import HomeAmbient from "../components/home-ambient";
+import HeroHeadline from "../components/hero-headline";
+import "./home-ambient.css";
 
 export const metadata: Metadata = {
   title: "Play Obscure — How Obscure Can You Get?",
@@ -11,14 +14,8 @@ export const metadata: Metadata = {
 export default function HomePage() {
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#101718] text-[#F0F2EA]">
-      {/* Very subtle atmospheric background */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-      >
-        <div className="absolute left-1/2 top-24 h-[520px] w-[800px] -translate-x-1/2 rounded-full bg-[#3B6551]/15 blur-[130px]" />
-        <div className="absolute right-[-200px] top-[900px] h-[500px] w-[500px] rounded-full bg-[#30556B]/10 blur-[140px]" />
-      </div>
+      {/* Animated blue/purple ambience, isolated to the homepage. */}
+      <HomeAmbient />
 
       <div className="relative mx-auto max-w-[1200px] px-6 sm:px-10">
         {/* Navigation */}
@@ -59,11 +56,7 @@ export default function HomePage() {
               A game of unexpected answers
             </div>
 
-            <h1 className="text-[clamp(3.4rem,8.5vw,7rem)] font-black leading-[1.02] tracking-[-0.075em]">
-              How obscure
-              <br />
-              can you <span className="text-[#CCF28A]">get?</span>
-            </h1>
+            <HeroHeadline />
 
             <p className="mt-9 max-w-[490px] text-base leading-8 text-[#A5B8AB] sm:text-lg">
               Five prompts. Five answers.

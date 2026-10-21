@@ -1,6 +1,7 @@
 
 "use client";
 import Link from "next/link";
+import { trackGameEvent } from "@/lib/analytics";
 
 import { useEffect, useRef, useState } from "react";
 import type { Category } from "@/lib/answers";
@@ -25,6 +26,7 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const session = useRef(0);
   const busyRef = useRef(false);
+  const startedOnceRef = useRef(false);
 
   // Only The Collector has a countdown timer.
   useEffect(() => {
@@ -49,6 +51,8 @@ export default function Home() {
   }, [game?.mode, game?.finished]);
 
   function start(mode: Mode) {
+    trackGameEvent(startedOnceRef.current ? "replay_start" : "game_start", "arcade", { arcade_mode: mode });
+    startedOnceRef.current = true;
     session.current++;
     busyRef.current = false;
     setGame(createGame(mode, category));
@@ -101,6 +105,7 @@ export default function Home() {
 
       const evaluation = applyAnswer(game, result);
 
+      trackGameEvent(evaluation.success ? "answer_accepted" : "answer_rejected", "arcade", { arcade_mode: game.mode });
       setGame(evaluation.game);
       setFeedback(evaluation.message);
 
@@ -134,6 +139,7 @@ export default function Home() {
     session.current++;
     busyRef.current = false;
     setBusy(false);
+    trackGameEvent("game_complete", "arcade", { arcade_mode: game.mode, score: game.score, answers_count: game.discoveries.length });
     setGame({ ...game, finished: true });
   }
 
@@ -150,6 +156,7 @@ export default function Home() {
 
     try {
       await navigator.clipboard.writeText(text);
+      trackGameEvent("result_share", "arcade", { arcade_mode: game.mode, method: "copy" });
       setCopied(true);
     } catch {
       setFeedback("Clipboard unavailable. Copy your results manually.");
@@ -516,6 +523,7 @@ export default function Home() {
                         session.current++;
                         busyRef.current = false;
                         setBusy(false);
+                        trackGameEvent("replay_start", "arcade", { arcade_mode: game.mode });
                         setGame(createGame(game.mode, game.category));
                         setGuess("");
                         setFeedback("");

@@ -3,6 +3,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { trackGameEvent } from "@/lib/analytics";
+import { RarityReveal, RarityReport } from "@/components/game/RarityExperience";
 
 import {
   GameHeader,
@@ -106,6 +108,10 @@ export default function DailyPage() {
   // ───────────────────────────────────────────
 
   function save(next: DailyRun) {
+    const previous = runRef.current;
+    if (next.phase === "done" && previous?.phase !== "done") {
+      trackGameEvent("game_complete", "daily", { score: next.discoveries.reduce((n, d) => n + d.rarity, 0), answers_count: next.discoveries.length, timed_out: next.remainingMs === 0 });
+    }
     runRef.current = next;
     setRun(next);
 
@@ -178,6 +184,7 @@ export default function DailyPage() {
             }
 
             setPrompts(saved.prompts);
+            runRef.current = saved;
             save(saved);
             setLoading(false);
             return;
@@ -277,6 +284,7 @@ export default function DailyPage() {
       return;
     }
 
+    trackGameEvent("game_start", "daily");
     setError("");
     setGuess("");
 
@@ -375,6 +383,7 @@ export default function DailyPage() {
       }
 
       if (!result.recognized) {
+        trackGameEvent("answer_rejected", "daily", { reason: "unknown" });
         setError(
           "Not in our vocabulary yet. Try another word."
         );
@@ -382,6 +391,7 @@ export default function DailyPage() {
       }
 
       if (!result.eligible) {
+        trackGameEvent("answer_rejected", "daily", { reason: "not_eligible" });
         setError(
           "Recognized, but that word doesn't fit this prompt."
         );
@@ -393,6 +403,7 @@ export default function DailyPage() {
           (item) => item.word === result.word
         )
       ) {
+        trackGameEvent("answer_rejected", "daily", { reason: "duplicate" });
         setError(
           "You've already used that word today."
         );
@@ -417,6 +428,7 @@ export default function DailyPage() {
         prompt: challenge.title,
       };
 
+      trackGameEvent("answer_accepted", "daily", { score: discovery.rarity, question_number: latest.round + 1 });
       // Successful answer: pause the clock.
       const remaining = Math.max(
         0,
@@ -507,6 +519,7 @@ export default function DailyPage() {
 
     try {
       await navigator.clipboard.writeText(text);
+      trackGameEvent("result_share", "daily", { method: "copy" });
       setCopied(true);
     } catch {
       setError("Clipboard unavailable.");
@@ -743,6 +756,8 @@ export default function DailyPage() {
                     )}
                   </div>
 
+                  <RarityReport answers={run.discoveries} total={total} mode="daily" />
+
                   <button
                     onClick={shareResults}
                     className={`${primaryButton} mt-9`}
@@ -781,24 +796,7 @@ export default function DailyPage() {
                     {latestDiscovery.word}
                   </h2>
 
-                  <div className="my-10 flex items-baseline justify-center gap-2">
-                    <span className="text-7xl font-black tracking-[-0.07em] text-[#CCF28A] sm:text-8xl">
-                      {latestDiscovery.rarity}
-                    </span>
-
-                    <span className="text-lg text-white/30">
-                      / 100
-                    </span>
-                  </div>
-
-                  <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#CCF28A]">
-                    ✦ {scoreLabel(latestDiscovery.rarity)} ✦
-                  </p>
-                  {latestDiscovery.rarityPercentile != null && (
-                    <p className="mt-3 text-sm text-white/70">
-                      Rarer than {latestDiscovery.rarityPercentile}% of valid answers
-                    </p>
-                  )}
+                  <RarityReveal answer={latestDiscovery} />
 
                   <p className="mt-10 text-sm text-white/45">
                     Clock paused · {formatTime(run.remainingMs)} remaining

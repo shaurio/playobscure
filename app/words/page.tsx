@@ -3,6 +3,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { trackGameEvent } from "@/lib/analytics";
+import { RarityReveal, RarityReport } from "@/components/game/RarityExperience";
 import {
   GameHeader,
   GameProgress,
@@ -155,7 +157,6 @@ export default function WordsPage() {
     useState<Discovery[]>([]);
 
   const [reveal, setReveal] = useState<Discovery | null>(null);
-  const [shownScore, setShownScore] = useState(0);
 
   const [timeLeft, setTimeLeft] = useState(180000);
 
@@ -239,39 +240,6 @@ export default function WordsPage() {
   }, [phase, duration, discoveries]);
 
   // -------------------------------------
-  // SCORE REVEAL ANIMATION
-  // -------------------------------------
-
-  useEffect(() => {
-    if (!reveal) return;
-
-    let frame = 0;
-    const begun = performance.now();
-
-    const animate = (now: number) => {
-      const portion = Math.min(
-        1,
-        (now - begun) / 700
-      );
-
-      setShownScore(
-        Math.round(
-          reveal.rarity *
-            (1 - (1 - portion) ** 3)
-        )
-      );
-
-      if (portion < 1) {
-        frame = requestAnimationFrame(animate);
-      }
-    };
-
-    frame = requestAnimationFrame(animate);
-
-    return () => cancelAnimationFrame(frame);
-  }, [reveal]);
-
-  // -------------------------------------
   // FINISH RUN
   // -------------------------------------
 
@@ -282,6 +250,7 @@ export default function WordsPage() {
     requestRef.current = false;
     setBusy(false);
 
+    trackGameEvent("game_complete", "words", { score, answers_count: discoveries.length, timed_out: expired, duration });
     setTimedOut(expired);
     setPhase("done");
     setReveal(null);
@@ -309,7 +278,11 @@ export default function WordsPage() {
   // START GAME AND GET RANDOM PROMPTS
   // -------------------------------------
 
+  const startedOnceRef = useRef(false);
+
   async function startGame() {
+    if (startedOnceRef.current) trackGameEvent("replay_start", "words", { duration });
+    startedOnceRef.current = true;
     const session = ++sessionRef.current;
 
     requestRef.current = false;
@@ -319,7 +292,6 @@ export default function WordsPage() {
     setGuess("");
     setDiscoveries([]);
     setReveal(null);
-    setShownScore(0);
 
     setError("");
     setNotice("");
@@ -327,6 +299,7 @@ export default function WordsPage() {
     setCopied(false);
     setTimedOut(false);
 
+    trackGameEvent("game_start", "words", { duration });
     setPhase("loading");
     setBusy(false);
 
@@ -478,6 +451,7 @@ export default function WordsPage() {
       }
 
       if (!result.recognized) {
+        trackGameEvent("answer_rejected", "words", { reason: "unknown" });
         setError(
           "Not in our vocabulary yet. Try another—no penalty."
         );
@@ -485,6 +459,7 @@ export default function WordsPage() {
       }
 
       if (!result.eligible) {
+        trackGameEvent("answer_rejected", "words", { reason: "not_eligible" });
         setError(
           "Recognized, but it doesn't satisfy this prompt."
         );
@@ -496,6 +471,7 @@ export default function WordsPage() {
           (item) => item.word === result.word
         )
       ) {
+        trackGameEvent("answer_rejected", "words", { reason: "duplicate" });
         setError(
           "You've used that word already. Try a different one."
         );
@@ -537,13 +513,13 @@ export default function WordsPage() {
         deadlineRef.current = null;
       }
 
+      trackGameEvent("answer_accepted", "words", { score: entry.rarity, question_number: round + 1 });
       setDiscoveries(
         (previous) => [...previous, entry]
       );
 
       setReveal(entry);
-      setShownScore(0);
-      setGuess("");
+        setGuess("");
       setPhase("reveal");
     } catch {
       if (session === sessionRef.current) {
@@ -615,6 +591,7 @@ export default function WordsPage() {
 
     try {
       await navigator.clipboard.writeText(text);
+      trackGameEvent("result_share", "words", { method: "copy" });
       setCopied(true);
     } catch {
       setError("Couldn't copy your results.");
@@ -842,6 +819,8 @@ export default function WordsPage() {
                     )}
                   </div>
 
+                  <RarityReport answers={discoveries} total={score} mode="words" />
+
                   <div className="mt-8 grid gap-3 sm:grid-cols-2">
                     <button
                       onClick={shareResults}
@@ -890,30 +869,7 @@ export default function WordsPage() {
                     {reveal.word}
                   </h2>
 
-                  <div
-                    className="mt-7 flex items-baseline justify-center gap-2"
-                    style={{ color: grade.color }}
-                  >
-                    <span className="text-7xl font-black tabular-nums sm:text-8xl">
-                      {shownScore}
-                    </span>
-
-                    <span className="text-lg text-white/30">
-                      /100
-                    </span>
-                  </div>
-
-                  <p
-                    className="mt-6 text-xs font-bold tracking-[0.25em]"
-                    style={{ color: grade.color }}
-                  >
-                    ✦ {grade.label} ✦
-                  </p>
-                  {reveal.rarityPercentile != null && (
-                    <p className="mt-3 text-sm text-white/70">
-                      Rarer than {reveal.rarityPercentile}% of valid answers
-                    </p>
-                  )}
+                  <RarityReveal answer={reveal} />
 
                   <p className="mt-5 text-sm text-white/45">
                     {isTimed

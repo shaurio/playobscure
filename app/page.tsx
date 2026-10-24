@@ -1,277 +1,80 @@
-
+import GameAtmosphere from "@/components/game/GameAtmosphere";
 import Link from "next/link";
 import type { Metadata } from "next";
-import LivingLexicon from "../components/living-lexicon";
-import RaritySpecimen from "../components/rarity-specimen";
-import HeroHeadline from "../components/hero-headline";
-import "./living-lexicon.css";
+import FluidWordmark from "../components/home/FluidWordmark";
+import WordDiscovery from "../components/home/WordDiscovery";
+import "./obscure-home.css";
 
 export const metadata: Metadata = {
-  title: "Play Obscure — How Obscure Can You Get?",
-  description:
-    "Five prompts. Five answers. Discover rare words and unexpected knowledge in Play Obscure.",
+  title: "PlayObscure — Find the unexpected",
+  description: "Five prompts. Five answers. Chase rare words in PlayObscure's daily and unlimited word games.",
 };
 
 export default function HomePage() {
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#101718] text-[#F0F2EA]">
-      {/* Animated blue/purple ambience, isolated to the homepage. */}
-      <LivingLexicon />
-
-      <div className="relative mx-auto max-w-[1200px] px-6 sm:px-10">
-        {/* Navigation */}
-        <header className="flex min-h-[88px] items-center justify-between gap-4 border-b border-white/10">
-          <Link
-            href="/"
-            className="text-[29px] font-black tracking-[-0.08em]"
-          >
-            obscure<span className="text-[#CCF28A]">.</span>
-          </Link>
-
-          <nav className="flex items-center gap-5 text-sm sm:gap-8">
-            <Link
-              href="/words"
-              className="text-white/65 transition hover:text-white"
-            >
-              Words
-            </Link>
-            <Link
-              href="/arcade"
-              className="text-white/65 transition hover:text-white"
-            >
-              Arcade
-            </Link>
+    <main className="po-home" id="top">
+      <GameAtmosphere mode="ambient" />
+      <div className="po-ambient" aria-hidden="true"><i /><i /><i /></div>
+      <div className="po-shell">
+        <header className="po-nav">
+          <Link href="/" className="po-logo" aria-label="PlayObscure home">obscure<span>.</span></Link>
+          <nav aria-label="Main navigation">
+            <Link href="/daily">Daily</Link>
+            <Link href="/words">Unlimited</Link>
+            <Link href="/arcade">Arcade</Link>
           </nav>
+          <Link href="/daily" className="po-navPlay">PLAY NOW <span aria-hidden="true">↗</span></Link>
         </header>
 
-        {/* Above-the-fold game invitation */}
-        <section className="relative flex min-h-[calc(100svh-88px)] flex-col items-center justify-center py-20 text-center">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute left-1/2 top-1/2 h-[350px] w-[350px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#CCF28A]/[0.045] blur-[85px]"
-          />
-
-          <div className="relative flex max-w-[850px] flex-col items-center">
-            <div className="mb-10 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#B8D49E]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#CCF28A]" />
-              A game of unexpected answers
-            </div>
-
-            <HeroHeadline />
-
-            <p className="mt-9 max-w-[490px] text-base leading-8 text-[#A5B8AB] sm:text-lg">
-              Five prompts. Five answers.
-              <br />
-              The less obvious your answers, the better.
-            </p>
-
-            <Link
-              href="/daily"
-              className="group mt-12 flex min-h-[74px] w-full max-w-[300px] items-center justify-center gap-5 rounded-xl bg-[#CCF28A] px-10 text-lg font-black tracking-[-0.01em] text-[#162218] shadow-[0_15px_60px_rgba(204,242,138,0.12)] transition duration-200 hover:-translate-y-1 hover:bg-[#E1FFAD] hover:shadow-[0_20px_80px_rgba(204,242,138,0.2)] active:translate-y-0"
-            >
-              PLAY NOW
-              <span className="text-2xl transition group-hover:translate-x-1">
-                →
-              </span>
-            </Link>
-            <div className="mt-4 grid w-full max-w-[300px] grid-cols-2 gap-3">
-  <Link
-    href="/words"
-    className="flex min-h-12 items-center justify-center rounded-lg border border-white/20 px-3 text-center text-sm font-semibold text-white/75 transition hover:border-[#CCF28A]/60 hover:text-[#CCF28A]"
-  >
-    Play Unlimited
-  </Link>
-
-  <Link
-    href="/arcade"
-    className="flex min-h-12 items-center justify-center rounded-lg border border-white/20 px-3 text-center text-sm font-semibold text-white/75 transition hover:border-[#CCF28A]/60 hover:text-[#CCF28A]"
-  >
-    Play Extra
-  </Link>
-</div>
-
-            <p className="mt-5 text-xs text-[#82978A]">
-              One daily attempt · 3 minutes · Free to play
-            </p>
-
-            <Link
-              href="#explore"
-              className="mt-14 flex flex-col items-center gap-3 text-xs text-white/35 transition hover:text-white/70"
-            >
-              Explore more
-              <span className="text-xl">↓</span>
-            </Link>
+        <section className="po-hero" aria-labelledby="po-hero-subtitle">
+          <div className="po-heroAura" aria-hidden="true" />
+          
+          <FluidWordmark />
+          <h2 className="po-subtitle" id="po-hero-subtitle">How obscure can you get?</h2>
+          <p className="po-heroCopy">Five prompts. Five answers.<br />The less obvious your answers, the better.</p>
+          <div className="po-heroActions">
+            <Link className="po-primaryButton" href="/daily">PLAY DAILY <span aria-hidden="true">↗</span></Link>
+            <Link className="po-secondaryButton" href="/words">PLAY UNLIMITED <span aria-hidden="true">→</span></Link>
           </div>
+          <p className="po-heroNote">No signup. Just words, intuition, and a little imagination.</p>
+          <Link href="#discover" className="po-scrollCue">EXPLORE THE UNKNOWN <span aria-hidden="true">↓</span></Link>
         </section>
 
-        <RaritySpecimen />
-
-        {/* Other ways to play */}
-        <section
-          id="explore"
-          className="scroll-mt-10 border-t border-white/10 py-20 sm:py-28"
-        >
-          <div className="mb-12">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.25em] text-[#CCF28A]">
-              More to discover
-            </p>
-
-            <h2 className="text-4xl font-bold tracking-[-0.055em] sm:text-5xl">
-              Find your kind of obscure.
-            </h2>
-
-            <p className="mt-5 max-w-xl text-sm leading-7 text-[#8DA097]">
-              Words are only the beginning. Explore rare knowledge
-              through different challenges.
-            </p>
+        <section className="po-modes" id="discover" aria-labelledby="po-modes-title">
+          <div className="po-sectionIntro">
+            <span className="po-eyebrow">01 / CHOOSE YOUR GAME <span className="po-eyebrowLine" /></span>
+            <h2 id="po-modes-title">An invitation<br /><em>to think differently.</em></h2>
+            <p>Every prompt has an obvious answer. The fun starts when you ignore it.</p>
           </div>
-
-          <div className="grid gap-5 md:grid-cols-2">
-            <Link
-              href="/words"
-              className="group flex min-h-[290px] flex-col rounded-xl border border-white/10 bg-[#1C2C25] p-8 transition hover:border-[#CCF28A]/45 sm:p-10"
-            >
-              <span className="text-4xl font-semibold tracking-[-0.07em] text-[#CCF28A]">
-                Aa.
-              </span>
-
-              <div className="mt-auto">
-                <h3 className="text-3xl font-bold tracking-[-0.05em]">
-                  Obscure Words
-                </h3>
-                <p className="mt-4 max-w-xs text-sm leading-7 text-[#A2BAAB]">
-                  Endless vocabulary challenges. How many
-                  unusual words can you remember?
-                </p>
-
-                <div className="mt-7 flex items-center justify-between border-t border-white/10 pt-5">
-                  <span className="text-xs text-[#A5BBAB]">
-                    Unlimited mode
-                  </span>
-                  <span className="text-xl text-[#CCF28A] transition group-hover:translate-x-1">
-                    ↗
-                  </span>
-                </div>
-              </div>
+          <div className="po-modeGrid">
+            <Link href="/daily" className="po-modeCard po-dailyCard">
+              <span className="po-cardNumber">01 / THE DAILY</span>
+              <span className="po-cardArt" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+              <div className="po-cardBody"><h3>One day.<br />One attempt.</h3><p>Five shared prompts. A fresh challenge every day. Make each answer count.</p></div>
+              <span className="po-cardBottom">ENTER THE DAILY <span aria-hidden="true">↗</span></span>
             </Link>
-
-            <Link
-              href="/arcade"
-              className="group flex min-h-[290px] flex-col rounded-xl border border-white/10 bg-[#1A272D] p-8 transition hover:border-[#9BC8DC]/45 sm:p-10"
-            >
-              <span className="text-4xl text-[#A2D9E4]">◈</span>
-
-              <div className="mt-auto">
-                <h3 className="text-3xl font-bold tracking-[-0.05em]">
-                  The Arcade
-                </h3>
-                <p className="mt-4 max-w-xs text-sm leading-7 text-[#9CB5BD]">
-                  Marine life, rarity climbs, obscure creatures,
-                  and six experimental game modes.
-                </p>
-
-                <div className="mt-7 flex items-center justify-between border-t border-white/10 pt-5">
-                  <span className="text-xs text-[#9CB5BD]">
-                    Six game modes
-                  </span>
-                  <span className="text-xl text-[#A2D9E4] transition group-hover:translate-x-1">
-                    ↗
-                  </span>
-                </div>
-              </div>
+            <Link href="/words" className="po-modeCard po-unlimitedCard">
+              <span className="po-cardNumber">02 / UNLIMITED</span>
+              <span className="po-cardRings" aria-hidden="true"><i /><i /><i /></span>
+              <div className="po-cardBody"><h3>There's always<br />another word.</h3><p>Keep playing, find unlikely answers, and chase a new personal best.</p></div>
+              <span className="po-cardBottom">PLAY UNLIMITED <span aria-hidden="true">↗</span></span>
             </Link>
           </div>
+          <Link href="/arcade" className="po-arcadeLink"><span>WANT SOMETHING DIFFERENT?</span><strong>Explore the Arcade</strong><span aria-hidden="true">↗</span></Link>
         </section>
 
-        {/* Next feature */}
-        <section className="grid gap-12 border-t border-white/10 py-20 sm:py-28 md:grid-cols-2 md:items-center">
-          <div>
-            <p className="mb-5 text-xs font-semibold uppercase tracking-[0.25em] text-[#CCF28A]">
-              Your daily challenge
-            </p>
+        <WordDiscovery />
 
-            <h2 className="text-4xl font-bold tracking-[-0.055em] sm:text-5xl">
-              The Daily Dive.
-            </h2>
-
-            <p className="mt-6 max-w-lg text-base leading-8 text-[#A5B8AB]">
-              One new challenge each day. Five questions.
-              One scored attempt.
-            </p>
-
-            <p className="mt-4 max-w-md text-sm leading-7 text-[#80988B]">
-              Everyone plays the same questions. Return tomorrow
-              to discover something new.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-white/10 p-7 sm:p-10">
-            <div className="mb-8 flex items-center justify-between gap-3">
-              <span className="text-xs uppercase tracking-[0.18em] text-[#A7B8AC]">
-                The Daily Dive
-              </span>
-              <span className="text-xs text-[#CCF28A]">
-                Play today
-              </span>
-            </div>
-
-            <div className="grid grid-cols-5 gap-2">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <div
-                  key={n}
-                  className="flex aspect-square items-center justify-center rounded-lg border border-white/10 bg-white/[0.025] text-xl font-bold text-white/35"
-                >
-                  {n}
-                </div>
-              ))}
-            </div>
-
-            <p className="mt-8 text-center text-xs text-[#81978A]">
-              A fresh set of five, every day.
-            </p>
-          </div>
+        <section className="po-finalCall" aria-label="Begin playing">
+          <span className="po-eyebrow">THE OBVIOUS IS ONLY THE BEGINNING</span>
+          <h2>Your next answer<br /><em>might surprise you.</em></h2>
+          <Link href="/daily" className="po-primaryButton">LET'S PLAY <span aria-hidden="true">↗</span></Link>
         </section>
 
-        {/* Future player features */}
-        <section className="border-t border-white/10 py-16 sm:py-20">
-          <div className="flex flex-wrap items-center justify-between gap-8">
-            <div>
-              <h2 className="text-2xl font-bold tracking-[-0.04em]">
-                Your discoveries matter.
-              </h2>
-
-              <p className="mt-3 max-w-lg text-sm leading-7 text-[#81978A]">
-                Personal records, achievements, daily streaks,
-                and First Discoverer titles are on our roadmap.
-              </p>
-            </div>
-
-            <span className="rounded-full border border-white/15 px-4 py-2 text-xs text-white/45">
-              More coming soon
-            </span>
-          </div>
-        </section>
-
-        <footer className="flex flex-wrap items-center justify-between gap-5 border-t border-white/10 py-9">
-          <Link
-            href="/"
-            className="text-xl font-black tracking-[-0.075em]"
-          >
-            obscure<span className="text-[#CCF28A]">.</span>
-          </Link>
-
-          <p className="text-xs text-[#71897B]">
-            The obvious is only the beginning.
-          </p>
-
-          <div className="flex gap-6 text-xs text-[#9AAB9E]">
-            <Link href="/words" className="hover:text-white">
-              Words
-            </Link>
-            <Link href="/arcade" className="hover:text-white">
-              Arcade
-            </Link>
-          </div>
+        <footer className="po-footer">
+          <Link href="/" className="po-logo">obscure<span>.</span></Link>
+          <span>Find the unexpected. © 2026 PlayObscure</span>
+          <div><Link href="/daily">Daily</Link><Link href="/words">Unlimited</Link><Link href="/arcade">Arcade</Link></div>
         </footer>
       </div>
     </main>

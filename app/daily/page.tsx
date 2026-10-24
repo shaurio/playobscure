@@ -1,6 +1,8 @@
 
 "use client";
 
+import GameAtmosphere from "@/components/game/GameAtmosphere";
+
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { trackGameEvent } from "@/lib/analytics";
@@ -464,6 +466,7 @@ export default function DailyPage() {
   // ───────────────────────────────────────────
 
   function continueRun() {
+    window.dispatchEvent(new Event("playobscure:atmosphere-reset"));
     const current = runRef.current;
 
     if (!current || current.phase !== "reveal") {
@@ -567,8 +570,9 @@ export default function DailyPage() {
   // ───────────────────────────────────────────
 
   return (
-    <main className="min-h-screen bg-[#0B100F] px-5 text-[#F0F2EA]">
-      <div className="mx-auto max-w-[850px]">
+    <main className="relative min-h-screen bg-transparent px-5 text-[#F0F2EA]">
+      <GameAtmosphere />
+      <div className="relative z-10 mx-auto max-w-[850px]">
 
         {/* SHARED NAVIGATION */}
 

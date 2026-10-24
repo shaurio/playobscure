@@ -1,0 +1,64 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import MoltenMetal from '../MoltenMetal';
+import { RARITY_ATMOSPHERE_EVENT, type RarityAtmosphereDetail } from '../../lib/rarity-atmosphere';
+
+const IDLE_OPACITY = 0.40;
+
+function profile(score: number) {
+  if (score >= 90) return { opacity: 0.65, glow: 'rgba(154, 108, 255, .24)', duration: 2100 };
+  if (score >= 70) return { opacity: 0.38, glow: 'rgba(108, 143, 255, .17)', duration: 1800 };
+  if (score >= 40) return { opacity: 0.20, glow: 'rgba(95, 160, 230, .12)', duration: 1450 };
+  return { opacity: 0.10, glow: 'rgba(180, 195, 218, .06)', duration: 1100 };
+}
+
+/** Mount exactly once inside each gameplay page. It stays behind all interactive UI. */
+export default function GameAtmosphere() {
+  const [opacity, setOpacity] = useState(IDLE_OPACITY);
+  const [glow, setGlow] = useState('transparent');
+  const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reducedMotion = useRef(false);
+
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reducedMotion.current = preference.matches;
+    const update = () => { reducedMotion.current = preference.matches; };
+    preference.addEventListener('change', update);
+    const onScore = (event: Event) => {
+      const value = (event as CustomEvent<RarityAtmosphereDetail>).detail?.score;
+      if (typeof value !== 'number' || !Number.isFinite(value)) return;
+      if (timeout.current) clearTimeout(timeout.current);
+      if (reducedMotion.current) return;
+      const result = profile(Math.max(0, Math.min(100, value)));
+      setOpacity(result.opacity);
+      setGlow(result.glow);
+      timeout.current = setTimeout(() => {
+        setOpacity(IDLE_OPACITY);
+        setGlow('transparent');
+      }, result.duration);
+    };
+    window.addEventListener(RARITY_ATMOSPHERE_EVENT, onScore);
+    return () => {
+      window.removeEventListener(RARITY_ATMOSPHERE_EVENT, onScore);
+      preference.removeEventListener('change', update);
+      if (timeout.current) clearTimeout(timeout.current);
+    };
+  }, []);
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-[#06070b]">
+      <div
+        className="absolute inset-0 will-change-[opacity]"
+        style={{ opacity, transition: 'opacity 850ms cubic-bezier(.22,1,.36,1)' }}
+      >
+        <MoltenMetal />
+      </div>
+      <div
+        className="absolute inset-0 transition-[background] duration-700"
+        style={{ background: `radial-gradient(ellipse at 50% 45%, ${glow}, transparent 70%)` }}
+      />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_15%,#06070b_95%)]" />
+    </div>
+  );
+}

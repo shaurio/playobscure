@@ -1,11 +1,18 @@
 "use client";
 
+import { emitRarityScore } from "@/lib/rarity-atmosphere";
+
 import { useEffect, useState } from "react";
 import type { RarityAnswer } from "./rarity-types";
 import { rarityTheme } from "./rarity-types";
 import "./score-effects.css";
 
 export function ScoreReveal({ answer }: { answer: RarityAnswer }) {
+  useEffect(() => {
+    emitRarityScore(answer.rarity);
+  }, [answer.word, answer.rarity]);
+
+
   const [display, setDisplay] = useState(0);
   const [entered, setEntered] = useState(false);
   const palette = rarityTheme(answer.rarity);

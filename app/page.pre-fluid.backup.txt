@@ -54,10 +54,7 @@ export default function HomePage() {
           />
 
           <div className="relative flex max-w-[850px] flex-col items-center">
-            <div className="mb-10 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#B8D49E]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#CCF28A]" />
-              A game of unexpected answers
-            </div>
+            
 
             <h1 className="text-[clamp(3.4rem,8.5vw,7rem)] font-black leading-[1.02] tracking-[-0.075em]">
               How obscure

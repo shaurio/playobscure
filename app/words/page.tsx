@@ -1,6 +1,8 @@
 
 "use client";
 
+import GameAtmosphere from "@/components/game/GameAtmosphere";
+
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { trackGameEvent } from "@/lib/analytics";
@@ -542,6 +544,7 @@ export default function WordsPage() {
   // -------------------------------------
 
   function continueRound() {
+    window.dispatchEvent(new Event("playobscure:atmosphere-reset"));
     if (phase !== "reveal") return;
 
     setReveal(null);
@@ -610,7 +613,8 @@ export default function WordsPage() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#0B100F] px-5 text-[#F0F2EA]">
-      <div className="mx-auto max-w-[850px]">
+      <GameAtmosphere />
+      <div className="relative z-10 mx-auto max-w-[850px]">
 
         <GameHeader mode="unlimited" />
 

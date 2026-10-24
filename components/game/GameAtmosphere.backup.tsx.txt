@@ -1,0 +1,69 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import MoltenMetal from "../MoltenMetal";
+import { RARITY_ATMOSPHERE_EVENT, type RarityAtmosphereDetail } from "../../lib/rarity-atmosphere";
+
+const IDLE = 0.2;
+const PALETTES = {
+  idle: ["#202329", "#9399a4", "#ffffff"],
+  common: ["#202329", "#9399a4", "#ffffff"],
+  uncommon: ["#073e54", "#1ebddc", "#e6faff"],
+  rare: ["#291152", "#9f64f8", "#f5d7ff"],
+  legendary: ["#5a0f36", "#fb5099", "#ffe7a1"],
+} as const;
+type Palette = keyof typeof PALETTES;
+
+function paletteFor(score: number): Palette {
+  if (score >= 90) return "legendary";
+  if (score >= 70) return "rare";
+  if (score >= 40) return "uncommon";
+  return "common";
+}
+
+/** Ambient on the homepage; reactive to rarity events in Daily and Unlimited. */
+export default function GameAtmosphere({ mode = "game" }: { mode?: "game" | "ambient" }) {
+  const [opacity, setOpacity] = useState(IDLE);
+  const [palette, setPalette] = useState<Palette>("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (mode === "ambient") return;
+    const handler = (event: Event) => {
+      const score = (event as CustomEvent<RarityAtmosphereDetail>).detail?.score;
+      if (typeof score !== "number" || !Number.isFinite(score)) return;
+      if (timer.current) clearTimeout(timer.current);
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reducedMotion) return;
+      const clamped = Math.max(0, Math.min(100, score));
+      setOpacity(clamped / 100); // 75 rarity = 75% opacity, literally linear.
+      setPalette(paletteFor(clamped));
+      timer.current = setTimeout(() => {
+        setOpacity(IDLE);
+        setPalette("idle");
+      }, 2800);
+    };
+    window.addEventListener(RARITY_ATMOSPHERE_EVENT, handler);
+    return () => {
+      window.removeEventListener(RARITY_ATMOSPHERE_EVENT, handler);
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [mode]);
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-[#06070b]">
+      <div className="absolute inset-0" style={{ opacity, transition: "opacity 650ms ease-out" }}>
+        {/* key ensures the installed shader receives palette changes even if it only reads initial props. */}
+        <MoltenMetal
+          key={palette}
+          colors={[...PALETTES[palette]]}
+          speed={0.2}
+          detail={8}
+          brightness={0.4}
+          mouseInteraction={false}
+        />
+      </div>
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_15%,#06070b_95%)]" />
+    </div>
+  );
+}

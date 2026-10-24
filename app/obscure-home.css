@@ -26,7 +26,7 @@
 .po-kicker,.po-eyebrow{position:relative;display:inline-flex;align-items:center;gap:15px;font-size:10px;font-weight:750;letter-spacing:.235em;color:#b7c3df}
 .po-kickerDot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#a6c3f4;box-shadow:0 0 17px #b5ceff}
 .po-wordmark{position:relative;width:min(100%,1140px);aspect-ratio:1400/275;margin:clamp(29px,4.5vw,58px) 0 clamp(5px,1.4vw,20px);overflow:hidden;isolation:isolate}
-.po-wordmarkFallback,.po-wordmarkLiquid,.po-wordmarkSheen{position:absolute;inset:0;mask-image:url('/obscure/wordmark-mask.svg');-webkit-mask-image:url('/obscure/wordmark-mask.svg');mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat;mask-size:100% 100%;-webkit-mask-size:100% 100%;mask-position:center;-webkit-mask-position:center}
+.po-wordmarkFallback,.po-wordmarkLiquid,.po-wordmarkSheen{position:absolute;inset:0;mask-image:url('/obscure/wordmark-mask.png');-webkit-mask-image:url('/obscure/wordmark-mask.png');mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat;mask-size:100% 100%;-webkit-mask-size:100% 100%;mask-position:center;-webkit-mask-position:center}
 .po-wordmarkFallback{background:linear-gradient(160deg,#f3f6ff 4%,#b9ccdd 27%,#39404d 39%,#f9fcff 48%,#767f99 72%,#e1e8ef 95%);filter:drop-shadow(0 12px 30px rgba(104,117,171,.25))}
 .po-wordmarkLiquid{z-index:1;opacity:.96;filter:contrast(1.35) brightness(1.48) saturate(1.28)}
 .po-wordmarkLiquid>div{width:100%!important;height:100%!important}

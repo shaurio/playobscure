@@ -1,0 +1,21 @@
+/* Homepage-only visual layer. Gameplay pages are unaffected. */
+.lexicon-backdrop{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:radial-gradient(ellipse at 50% 19%,rgba(47,88,60,.25),transparent 48%)}
+.lexicon-halo{position:absolute;left:50%;top:9%;width:min(88vw,950px);height:700px;transform:translateX(-50%);background:radial-gradient(ellipse,rgba(113,159,103,.14),transparent 66%);filter:blur(32px)}
+.lexicon-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.lexicon-fade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(16,23,24,.06),transparent 34%,rgba(16,23,24,.43) 96%),linear-gradient(90deg,rgba(16,23,24,.65),transparent 22%,transparent 78%,rgba(16,23,24,.65))}
+.specimen-section{position:relative;display:grid;grid-template-columns:.85fr 1.15fr;align-items:center;gap:clamp(32px,7vw,100px);padding:95px 0 110px;border-top:1px solid rgba(255,255,255,.1)}
+.specimen-intro{position:relative;z-index:1}.specimen-kicker,.specimen-tier{letter-spacing:.24em;font-size:11px;font-weight:700;color:#c9ea9d}
+.specimen-intro h2{font-family:Georgia,serif;font-size:clamp(35px,4.8vw,64px);font-weight:400;line-height:1.08;letter-spacing:-.055em;margin:22px 0}
+.specimen-intro p{max-width:360px;font-size:15px;line-height:1.9;color:#a5b8ab}
+.specimen-card{position:relative;overflow:hidden;min-height:355px;display:flex;flex-direction:column;align-items:center;padding:25px 32px;background:radial-gradient(circle at 50% 48%,#244238 0%,#192b27 54%,#13201e 100%);border:1px solid rgba(207,240,173,.29);border-radius:15px;box-shadow:0 24px 90px #02080755,inset 0 0 80px #badc7f09;text-align:center;transition:box-shadow .4s}
+.specimen-card:hover{box-shadow:0 30px 100px #02080777,0 0 65px #c5e69e18}
+.specimen-top,.specimen-bottom{align-self:stretch;display:flex;justify-content:space-between;gap:12px;align-items:center;color:#b8c9b7;font-size:10px;letter-spacing:.13em}
+.specimen-sigil{position:absolute;top:70px;width:164px;height:164px;display:grid;place-items:center;border:1px solid #d7e9ad26;border-radius:50%;box-shadow:0 0 0 20px #d7e9ad08,0 0 0 40px #d7e9ad05;transition:transform .8s cubic-bezier(.2,.7,.2,1)}
+.specimen-sigil span{color:#cfe5aa55;font-size:86px;line-height:1}.specimen-card:hover .specimen-sigil{transform:rotate(42deg) scale(1.07)}
+.specimen-tier{position:relative;margin:110px 0 10px;font-size:9px}.specimen-card h3{position:relative;font-family:Georgia,serif;font-size:clamp(30px,4vw,55px);font-weight:400;line-height:1.1;letter-spacing:-.055em;color:#f2f2de;opacity:0;transform:translateY(18px) scale(.97);transition:opacity .65s,transform .75s cubic-bezier(.15,.7,.2,1)}
+.specimen-card.is-revealed h3{opacity:1;transform:translateY(0) scale(1)}
+.specimen-definition{position:relative;margin:15px 0 35px;color:#bed1bd;font-size:13px;line-height:1.65;opacity:0;transition:opacity .75s .28s}.specimen-card.is-revealed .specimen-definition{opacity:1}
+.specimen-bottom{margin-top:auto;border-top:1px solid #ffffff20;padding-top:17px;letter-spacing:normal}.specimen-bottom button{cursor:pointer;border:1px solid #d0eca747;background:#d7edac11;color:#d8efb5;padding:10px 13px;border-radius:7px;font-weight:700;font-size:10px;letter-spacing:.11em;transition:background .2s,transform .2s}.specimen-bottom button:hover{background:#d7edac30;transform:translateY(-2px)}
+.specimen-note{position:absolute;bottom:55px;right:0;max-width:570px;color:#81978a;font-size:11px;text-align:right}
+@media(max-width:760px){.specimen-section{grid-template-columns:1fr;padding:70px 0 100px;gap:26px}.specimen-card{min-height:330px}.specimen-note{bottom:57px;text-align:left;left:0;right:auto}.specimen-intro h2{font-size:40px}}
+@media(prefers-reduced-motion:reduce){.specimen-card *{transition:none!important}.specimen-card h3,.specimen-definition{opacity:1;transform:none}}

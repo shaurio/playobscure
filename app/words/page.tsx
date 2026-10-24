@@ -4,7 +4,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { trackGameEvent } from "@/lib/analytics";
-import { RarityReveal, RarityReport } from "@/components/game/RarityExperience";
+import { ScoreReveal } from "@/components/game/ScoreReveal";
+import { RarityReport } from "@/components/game/RarityReport";
+import { PromptHeading } from "@/components/game/PromptHeading";
 import {
   GameHeader,
   GameProgress,
@@ -869,7 +871,7 @@ export default function WordsPage() {
                     {reveal.word}
                   </h2>
 
-                  <RarityReveal answer={reveal} />
+                  <ScoreReveal answer={reveal} />
 
                   <p className="mt-5 text-sm text-white/45">
                     {isTimed
@@ -894,27 +896,12 @@ export default function WordsPage() {
                 /* ACTIVE QUESTION */
 
                 <div className="py-3 sm:py-7">
-                  <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-widest text-[#CCF28A]">
-                    <span>{activePrompt.label}</span>
-                    <span className="text-white/40">
-                      {round + 1} / 5
-                    </span>
-                  </div>
-
-                  <h2 className="mt-10 text-3xl font-black leading-tight tracking-tight sm:text-4xl">
-                    {activePrompt.title}
-                  </h2>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {activePrompt.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-white/55"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
+                  <PromptHeading
+                    title={activePrompt.title}
+                    round={round}
+                    label={activePrompt.label}
+                    tags={activePrompt.tags}
+                  />
 
                   <form
                     onSubmit={submit}

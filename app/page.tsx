@@ -1,9 +1,10 @@
 
 import Link from "next/link";
 import type { Metadata } from "next";
-import HomeAmbient from "../components/home-ambient";
+import LivingLexicon from "../components/living-lexicon";
+import RaritySpecimen from "../components/rarity-specimen";
 import HeroHeadline from "../components/hero-headline";
-import "./home-ambient.css";
+import "./living-lexicon.css";
 
 export const metadata: Metadata = {
   title: "Play Obscure — How Obscure Can You Get?",
@@ -15,7 +16,7 @@ export default function HomePage() {
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#101718] text-[#F0F2EA]">
       {/* Animated blue/purple ambience, isolated to the homepage. */}
-      <HomeAmbient />
+      <LivingLexicon />
 
       <div className="relative mx-auto max-w-[1200px] px-6 sm:px-10">
         {/* Navigation */}
@@ -103,6 +104,8 @@ export default function HomePage() {
           </div>
         </section>
 
+        <RaritySpecimen />
+
         {/* Other ways to play */}
         <section
           id="explore"
@@ -184,7 +187,7 @@ export default function HomePage() {
         <section className="grid gap-12 border-t border-white/10 py-20 sm:py-28 md:grid-cols-2 md:items-center">
           <div>
             <p className="mb-5 text-xs font-semibold uppercase tracking-[0.25em] text-[#CCF28A]">
-              Coming soon
+              Your daily challenge
             </p>
 
             <h2 className="text-4xl font-bold tracking-[-0.055em] sm:text-5xl">
@@ -208,7 +211,7 @@ export default function HomePage() {
                 The Daily Dive
               </span>
               <span className="text-xs text-[#CCF28A]">
-                In development
+                Play today
               </span>
             </div>
 

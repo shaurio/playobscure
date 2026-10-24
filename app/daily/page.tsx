@@ -4,7 +4,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { trackGameEvent } from "@/lib/analytics";
-import { RarityReveal, RarityReport } from "@/components/game/RarityExperience";
+import { ScoreReveal } from "@/components/game/ScoreReveal";
+import { RarityReport } from "@/components/game/RarityReport";
+import { PromptHeading, promptConstraints } from "@/components/game/PromptHeading";
 
 import {
   GameHeader,
@@ -796,7 +798,7 @@ export default function DailyPage() {
                     {latestDiscovery.word}
                   </h2>
 
-                  <RarityReveal answer={latestDiscovery} />
+                  <ScoreReveal answer={latestDiscovery} />
 
                   <p className="mt-10 text-sm text-white/45">
                     Clock paused · {formatTime(run.remainingMs)} remaining
@@ -818,21 +820,20 @@ export default function DailyPage() {
 
                 <div className="py-3 sm:py-6">
 
-                  <p className="text-center text-xs font-bold uppercase tracking-[0.25em] text-[#CCF28A]">
-                    The word laboratory
-                  </p>
-
-                  <h2 className="mx-auto mt-12 max-w-[600px] text-center text-3xl font-black leading-[1.25] tracking-[-0.045em] sm:text-4xl">
-                    {currentChallenge?.title}
-                  </h2>
+                  <PromptHeading
+                    title={currentChallenge?.title ?? "Your next word challenge"}
+                    round={run.round}
+                    label="DAILY WORD CHALLENGE"
+                    tags={promptConstraints(currentChallenge)}
+                  />
 
                   <form
                     onSubmit={submit}
-                    className="mx-auto mt-12 max-w-[560px]"
+                    className="mt-10"
                   >
                     <label
                       htmlFor="daily-answer"
-                      className="mb-3 block text-sm text-white/50"
+                      className="mb-3 block text-xs font-semibold uppercase tracking-widest text-white/50"
                     >
                       Your answer
                     </label>
@@ -841,14 +842,17 @@ export default function DailyPage() {
                       id="daily-answer"
                       autoFocus
                       value={guess}
-                      onChange={(event) =>
-                        setGuess(event.target.value)
-                      }
+                      onChange={(event) => {
+                        setGuess(event.target.value);
+                        setError("");
+                      }}
                       disabled={busy}
                       maxLength={24}
                       autoComplete="off"
-                      placeholder="Think of something obscure..."
-                      className="w-full border-b border-white/25 bg-transparent px-1 py-5 text-xl text-white outline-none placeholder:text-white/25 focus:border-[#CCF28A]"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      placeholder="Think of something uncommon..."
+                      className="w-full border-b border-white/25 bg-transparent px-1 py-5 text-xl outline-none placeholder:text-white/25 focus:border-[#CCF28A]"
                     />
 
                     <button
@@ -875,10 +879,9 @@ export default function DailyPage() {
                     </p>
                   )}
 
-                  <p className="mt-10 text-center text-xs leading-6 text-white/35">
-                    Invalid answers don't consume a question.
-                    <br />
-                    Your first valid answer is final.
+                  <p className="mt-8 text-xs leading-6 text-white/35">
+                    Invalid answers don't consume a question. Your first valid answer is final.
+                    The clock keeps running while you think.
                   </p>
                 </div>
               )}

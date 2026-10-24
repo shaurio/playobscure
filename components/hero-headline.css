@@ -1,0 +1,39 @@
+.liquid-chrome-title {
+  position: relative;
+  isolation: isolate;
+  display: block;
+  width: min(100%, 850px);
+  margin: 0 auto;
+  padding: .10em 0 .15em;
+  font-family: inherit;
+  font-size: clamp(3rem, 7vw, 6.5rem);
+  font-weight: 900;
+  line-height: 1.07;
+  letter-spacing: -.065em;
+  text-align: center;
+  cursor: default;
+}
+.liquid-chrome-title__text {
+  display: block;
+  color: #dce7f5;
+  background: linear-gradient(110deg,#e2e8f6 10%,#80b7e5 45%,#efd8f4 70%,#d9ecfa);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.liquid-chrome-title__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .3s ease;
+}
+.liquid-chrome-title--ready .liquid-chrome-title__canvas { opacity: 1; }
+.liquid-chrome-title--ready .liquid-chrome-title__text { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .liquid-chrome-title__canvas { display: none; }
+  .liquid-chrome-title__text { opacity: 1 !important; }
+}
